@@ -13,7 +13,7 @@ export type TreeNode = {
   hasChildren: boolean;
 };
 
-export type SuperClass = {
+export type Ref = {
   iri: string;
   label: string;
 };
@@ -21,9 +21,19 @@ export type SuperClass = {
 export type EntityInfo = {
   iri: string;
   label: string;
-  superClasses: SuperClass[];
+  kind: string;
+  superClasses: Ref[];
+  domains: Ref[];
+  ranges: Ref[];
+  types: Ref[];
   annotations: string[];
   axioms: string[];
+};
+
+export type EditState = {
+  dirty: boolean;
+  canUndo: boolean;
+  canRedo: boolean;
 };
 
 export type GraphNode = {
@@ -80,28 +90,50 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ path }),
     }),
-  hierarchy: (parent?: string) =>
-    call<{ children: TreeNode[] }>(
-      `/hierarchy${parent ? `?parent=${encodeURIComponent(parent)}` : ""}`,
-    ),
+  hierarchy: (parent?: string, inferred?: boolean) => {
+    const params = new URLSearchParams();
+    if (parent) {
+      params.set("parent", parent);
+    }
+    if (inferred) {
+      params.set("inferred", "true");
+    }
+    const query = params.toString();
+    return call<{ children: TreeNode[] }>(`/hierarchy${query ? `?${query}` : ""}`);
+  },
   entity: (iri: string) =>
     call<EntityInfo>(`/entity?iri=${encodeURIComponent(iri)}`),
-  graph: (root: string | undefined, depth: number) =>
+  graph: (root: string | undefined, depth: number, inferred?: boolean) =>
     call<GraphSlice>(
-      `/graph?depth=${depth}${root ? `&root=${encodeURIComponent(root)}` : ""}`,
+      `/graph?depth=${depth}${root ? `&root=${encodeURIComponent(root)}` : ""}${inferred ? "&inferred=true" : ""}`,
     ),
+  startReasoner: () => call<{ running: boolean; name: string }>("/reasoner/start", { method: "POST" }),
+  stopReasoner: () => call<{ running: boolean }>("/reasoner/stop", { method: "POST" }),
   addSubclass: (sub: string, sup: string) =>
-    call<{ ok: boolean; dirty: boolean }>("/axiom/subclass", {
+    call<EditState>("/axiom/subclass", {
       method: "POST",
       body: JSON.stringify({ sub, sup }),
     }),
   removeSubclass: (sub: string, sup: string) =>
-    call<{ ok: boolean; dirty: boolean }>("/axiom/subclass/remove", {
+    call<EditState>("/axiom/subclass/remove", {
       method: "POST",
       body: JSON.stringify({ sub, sup }),
     }),
+  addAxiomText: (text: string) =>
+    call<EditState & { added: string[] }>("/axiom/add-text", {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    }),
+  removeRenderedAxiom: (iri: string, text: string) =>
+    call<EditState>("/axiom/remove-rendered", {
+      method: "POST",
+      body: JSON.stringify({ iri, text }),
+    }),
+  undo: () => call<EditState>("/undo", { method: "POST" }),
+  redo: () => call<EditState>("/redo", { method: "POST" }),
+  history: () => call<EditState>("/history"),
   save: (path?: string) =>
-    call<{ ok: boolean; path: string; dirty: boolean }>("/ontology/save", {
+    call<EditState & { path: string }>("/ontology/save", {
       method: "POST",
       body: JSON.stringify(path ? { path } : {}),
     }),

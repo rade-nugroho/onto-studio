@@ -22,6 +22,20 @@ fn engine_info(state: State<Engine>) -> EngineInfo {
     state.info.clone()
 }
 
+fn parse_handshake(line: &str) -> Result<EngineInfo, String> {
+    let value: serde_json::Value =
+        serde_json::from_str(line.trim()).map_err(|error| error.to_string())?;
+    Ok(EngineInfo {
+        port: value["port"]
+            .as_u64()
+            .ok_or("handshake is missing a port")? as u16,
+        token: value["token"]
+            .as_str()
+            .ok_or("handshake is missing a token")?
+            .to_string(),
+    })
+}
+
 fn spawn_engine() -> Engine {
     let jar = std::env::var("ONTOSTUDIO_ENGINE_JAR").unwrap_or_else(|_| {
         format!(
@@ -45,17 +59,28 @@ fn spawn_engine() -> Engine {
     BufReader::new(stdout)
         .read_line(&mut line)
         .expect("engine handshake");
-    let handshake: serde_json::Value =
-        serde_json::from_str(line.trim()).expect("engine handshake json");
     Engine {
-        info: EngineInfo {
-            port: handshake["port"].as_u64().expect("engine port") as u16,
-            token: handshake["token"]
-                .as_str()
-                .expect("engine token")
-                .to_string(),
-        },
+        info: parse_handshake(&line).expect("engine handshake"),
         child: Mutex::new(child),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_handshake_line() {
+        let info = parse_handshake("{\"port\":1234,\"token\":\"abc\"}").expect("valid handshake");
+        assert_eq!(info.port, 1234);
+        assert_eq!(info.token, "abc");
+    }
+
+    #[test]
+    fn rejects_malformed_handshake() {
+        assert!(parse_handshake("not json").is_err());
+        assert!(parse_handshake("{\"token\":\"abc\"}").is_err());
+        assert!(parse_handshake("{\"port\":1234}").is_err());
     }
 }
 

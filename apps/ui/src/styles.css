@@ -285,3 +285,54 @@ h3 {
   padding: 3px 8px;
   font-size: 12px;
 }
+
+.link {
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: var(--accent);
+  text-align: left;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+.axiom-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.axiom-input {
+  width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  resize: vertical;
+}
+
+.row-actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+h2 .kind {
+  margin-left: 6px;
+  font-weight: 400;
+}
+
+.active-toggle {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}

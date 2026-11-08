@@ -21,6 +21,19 @@ public final class Main {
                 : Long.toHexString(new java.security.SecureRandom().nextLong());
 
         Workspace workspace = new Workspace();
+        Javalin app = createApp(workspace, token);
+        app.start("127.0.0.1", port);
+        if (java.util.Arrays.asList(args).contains("--watch-parent")) {
+            watchParent();
+        }
+        int boundPort = app.port();
+
+        // The desktop shell reads this single line to learn where to connect.
+        System.out.println("{\"port\":" + boundPort + ",\"token\":\"" + token + "\"}");
+        System.out.flush();
+    }
+
+    static Javalin createApp(Workspace workspace, String token) {
         Javalin app = Javalin.create(config -> {
             config.showJavalinBanner = false;
             config.jsonMapper(new JavalinJackson());
@@ -42,26 +55,30 @@ public final class Main {
 
         app.get("/health", ctx -> ctx.json(Map.of("status", "ok", "version", "0.1.0")));
         app.post("/ontology/open", ctx -> workspace.open(ctx.bodyAsClass(OpenRequest.class), ctx));
-        app.get("/hierarchy", ctx -> workspace.hierarchy(ctx.queryParam("parent"), ctx));
+        app.get("/hierarchy", ctx -> workspace.hierarchy(
+                ctx.queryParam("parent"),
+                "true".equals(ctx.queryParam("inferred")),
+                ctx));
         app.get("/entity", ctx -> workspace.entity(ctx.queryParam("iri"), ctx));
         app.get("/search", ctx -> workspace.search(ctx.queryParam("q"), ctx));
         app.post("/axiom/subclass", ctx -> workspace.addSubclass(ctx.bodyAsClass(SubclassRequest.class), ctx));
         app.post("/axiom/subclass/remove", ctx -> workspace.removeSubclass(ctx.bodyAsClass(SubclassRequest.class), ctx));
         app.post("/ontology/save", ctx -> workspace.save(ctx.bodyAsClass(SaveRequest.class), ctx));
+        app.post("/axiom/add-text", ctx -> workspace.addAxiomText(ctx.bodyAsClass(AxiomTextRequest.class), ctx));
+        app.post("/axiom/remove-text", ctx -> workspace.removeAxiomText(ctx.bodyAsClass(AxiomTextRequest.class), ctx));
+        app.post("/axiom/remove-rendered", ctx -> workspace.removeRenderedAxiom(ctx.bodyAsClass(RenderedAxiomRequest.class), ctx));
+        app.post("/undo", workspace::undo);
+        app.post("/redo", workspace::redo);
+        app.get("/history", workspace::history);
         app.get("/graph", ctx -> workspace.graph(
                 ctx.queryParam("root"),
                 ctx.queryParam("depth") == null ? 2 : Integer.parseInt(ctx.queryParam("depth")),
+                "true".equals(ctx.queryParam("inferred")),
                 ctx));
-
-        app.start("127.0.0.1", port);
-        if (java.util.Arrays.asList(args).contains("--watch-parent")) {
-            watchParent();
-        }
-        int boundPort = app.port();
-
-        // The desktop shell reads this single line to learn where to connect.
-        System.out.println("{\"port\":" + boundPort + ",\"token\":\"" + token + "\"}");
-        System.out.flush();
+        app.post("/reasoner/start", workspace::startReasoner);
+        app.post("/reasoner/stop", workspace::stopReasoner);
+        app.get("/reasoner/status", workspace::reasonerStatus);
+        return app;
     }
 
     public record OpenRequest(String path) {
@@ -71,6 +88,12 @@ public final class Main {
     }
 
     public record SaveRequest(String path) {
+    }
+
+    public record AxiomTextRequest(String text) {
+    }
+
+    public record RenderedAxiomRequest(String iri, String text) {
     }
 
     /**

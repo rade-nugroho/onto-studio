@@ -6,3 +6,4 @@ target/
 .playwright-mcp/
 .cursor/
 apps/desktop/src-tauri/gen/
+.env.local
