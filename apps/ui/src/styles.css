@@ -25,6 +25,12 @@
     --ring: 193 57% 39%;
     --radius: 1rem;
     --rb-r-lg: 1.5rem;
+    --rb-accent: oklch(20.5% 0 0);
+    --rb-accent-fg: oklch(100% 0 0);
+  }
+  .dark {
+    --rb-accent: oklch(100% 0 0);
+    --rb-accent-fg: oklch(20.5% 0 0);
   }
 }
 

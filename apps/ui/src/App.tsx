@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { api, type EditState, type EntityInfo, type OntologyInfo, type SearchResult, type TreeNode } from "./api";
 import EntityPanel from "./EntityPanel";
 import GraphView from "./GraphView";
 import AppShell9 from "@/components/blocks/app-shell-9";
 import CommandMenu1, { type Command } from "@/components/blocks/command-menu-1";
+import AppSidebar2 from "@/components/blocks/app-sidebar-2";
+
+const AiChat3 = lazy(() => import("@/components/blocks/ai-chat-3"));
 import {
   ArrowDown01Icon,
   CheckListIcon,
@@ -23,7 +26,7 @@ export default function App() {
   const [entity, setEntity] = useState<EntityInfo | null>(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
-  const [view, setView] = useState<"tree" | "graph">("tree");
+  const [view, setView] = useState<"tree" | "graph" | "assistant">("tree");
   const [depth, setDepth] = useState(2);
   const [dirty, setDirty] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
@@ -216,6 +219,7 @@ export default function App() {
       },
       { id: "tree", group: "View", title: "Show class tree", icon: LayoutTemplateIcon },
       { id: "graph", group: "View", title: "Show class graph", icon: LayoutTemplateIcon },
+      { id: "assistant", group: "View", title: "Show assistant", icon: SparklesIcon },
       { id: "search", group: "Navigation", title: "Focus search", icon: Search01Icon },
     ],
     [reasoning],
@@ -245,6 +249,9 @@ export default function App() {
         case "graph":
           setView("graph");
           break;
+        case "assistant":
+          setView("assistant");
+          break;
         case "search":
           document.querySelector<HTMLInputElement>("input.search")?.focus();
           break;
@@ -262,49 +269,26 @@ export default function App() {
       sidebarOpen={sidebarOpen}
       onSidebarOpenChange={setSidebarOpen}
       sidebar={
-        <div className="side">
-          <div className="side-head">
-            <div className="side-title">Onto Studio</div>
-            <button
-              className="side-collapse"
-              onClick={() => setSidebarOpen(false)}
-              title="Hide sidebar"
-              aria-label="Hide sidebar"
-            >
-              ‹
-            </button>
-          </div>
-          <div className="side-sub">{ontology ? ontology.path : "No ontology open"}</div>
-          {ontology && (
-            <div className="side-stats">
-              {ontology.axiomCount.toLocaleString()} axioms
-              <br />
-              {ontology.entityCount} entities
-            </div>
-          )}
-          <div className="side-actions">
-            <button onClick={openFile}>Open ontology…</button>
-            <button onClick={save} disabled={!ontology}>
-              Save{dirty ? " •" : ""}
-            </button>
-            <button onClick={undo} disabled={!canUndo}>
-              Undo
-            </button>
-            <button onClick={redo} disabled={!canRedo}>
-              Redo
-            </button>
-            <button
-              className={reasoning ? "active-toggle" : ""}
-              onClick={toggleReasoner}
-              disabled={!ontology}
-            >
-              {reasoning ? "Reasoning on" : "Start reasoner"}
-            </button>
-          </div>
-          <div className="side-hint">
-            ⌘Z undo · ⌘⇧Z redo · ⌘S save
-          </div>
-        </div>
+        <AppSidebar2
+          brand="O"
+          groups={[
+            [
+              { label: "Classes", icon: LayoutTemplateIcon, children: ["All classes", "Top level"] },
+              { label: "Properties", icon: Search01Icon, children: ["Object properties", "Data properties", "Annotation properties"] },
+            ],
+            [
+              { label: "Individuals", icon: SparklesIcon, children: ["All individuals", "By class"] },
+              { label: "Reasoner", icon: ArrowDown01Icon, children: ["Start", "Stop"] },
+            ],
+          ]}
+          onSelect={(group, item) => {
+            if (group === "Reasoner") {
+              toggleReasoner();
+              return;
+            }
+            runSearch(item === "All classes" || item === "Top level" ? "" : item);
+          }}
+        />
       }
     >
     <div className="app">
@@ -325,6 +309,12 @@ export default function App() {
           </button>
           <button className={view === "graph" ? "active" : ""} onClick={() => setView("graph")}>
             Graph
+          </button>
+          <button
+            className={view === "assistant" ? "active" : ""}
+            onClick={() => setView("assistant")}
+          >
+            Assistant
           </button>
         </div>
         {view === "graph" && (
@@ -359,8 +349,17 @@ export default function App() {
         </div>
       )}
 
-      <main className={view === "graph" ? "panes graph" : "panes"}>
-        {view === "graph" ? (
+      <main
+        className={view === "graph" ? "panes graph" : "panes"}
+        style={view === "assistant" ? { gridTemplateColumns: "1fr" } : undefined}
+      >
+        {view === "assistant" ? (
+          <div className="canvas">
+            <Suspense fallback={null}>
+              <AiChat3 />
+            </Suspense>
+          </div>
+        ) : view === "graph" ? (
           <div className="canvas">
             <GraphView
               depth={depth}
@@ -389,18 +388,20 @@ export default function App() {
           </aside>
         )}
 
-        <section className="detail">
-          {!entity && <div className="empty">Select a class to see its axioms</div>}
-          {entity && (
-            <EntityPanel
-              key={entity.iri + version}
-              entity={entity}
-              onEdited={onEdited}
-              onSelect={select}
-              onError={setError}
-            />
-          )}
-        </section>
+        {view !== "assistant" && (
+          <section className="detail">
+            {!entity && <div className="empty">Select a class to see its axioms</div>}
+            {entity && (
+              <EntityPanel
+                key={entity.iri + version}
+                entity={entity}
+                onEdited={onEdited}
+                onSelect={select}
+                onError={setError}
+              />
+            )}
+          </section>
+        )}
       </main>
 
       {error && <div className="error">{error}</div>}
