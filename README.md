@@ -1,17 +1,75 @@
-# Protege Desktop
+# Onto Studio
 
-[Protege](https://protege.stanford.edu) is a free, open-source ontology editor that supports the latest [OWL 2.0 standard](http://www.w3.org/TR/owl2-overview/). Protege has a pluggable architecture, and many [plugins](https://protegewiki.stanford.edu/wiki/Protege_Plugin_Library) for different functionalities are available.
+Internal, keyboard-first ontology workbench for ontology engineers.
+React UI in a Tauri shell, with a local Java engine that owns OWL API.
 
-To read more about **Protege's features**, please visit the Protege [home page](https://protege.stanford.edu).
+## Layout
 
-The latest version of Protege can be [downloaded](https://protege.stanford.edu/software.php#desktop-protege) from the Protege website, or from [github](https://github.com/protegeproject/protege-distribution/releases).
+```
+apps/ui/            React + TypeScript + Vite front end
+apps/desktop/       Tauri v2 shell (Rust), spawns the engine
+services/engine/    Java 21 engine: Javalin + OWL API
+scripts/            dev helpers
+```
 
-If you would like to contribute to the Protege Project please see our [contributing guide](https://github.com/protegeproject/protege/blob/master/CONTRIBUTING.md)
+## Requirements
 
-The [Developer Documentation](https://github.com/protegeproject/protege/wiki/Developer-Documentation) may be found on the wiki.
+- JDK 21 (`brew install openjdk@21`)
+- Node 20+ and npm
+- Rust toolchain (cargo)
 
-**Looking for support?** Please ask questions on the [protege-user](https://protege.stanford.edu/support.php) or [protege-dev](https://protege.stanford.edu/support.php) mailing lists. If you found a bug or would like to request a feature, you may also use [this issue tracker](https://github.com/protegeproject/protege/issues).
+## Run in development
 
-Protege is released under the [BSD 2-clause license](https://raw.githubusercontent.com/protegeproject/protege/master/license.txt).
+```bash
+./scripts/dev.sh
+```
 
-Instructions for [building from source](https://github.com/protegeproject/protege/wiki/Building-from-Source) are available on the the wiki.
+The script builds the engine jar, starts Vite, then runs the Tauri shell.
+The shell spawns `services/engine/target/engine.jar` on an ephemeral port and
+passes the port and session token to the UI through the `engine_info` command.
+
+## Run the engine alone
+
+```bash
+cd services/engine
+JAVA_HOME=$(/usr/libexec/java_home -v 21) mvn -q -DskipTests package
+java -jar target/engine.jar --port 7717 --token dev
+```
+
+Then, with `X-Engine-Token: dev`:
+
+```bash
+curl -H "X-Engine-Token: dev" http://127.0.0.1:7717/health
+curl -H "X-Engine-Token: dev" -H "Content-Type: application/json" \
+     -d '{"path":"/path/to/pizza.owl"}' http://127.0.0.1:7717/ontology/open
+curl -H "X-Engine-Token: dev" http://127.0.0.1:7717/hierarchy
+curl -H "X-Engine-Token: dev" "http://127.0.0.1:7717/graph?depth=2"
+```
+
+## API (v0)
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /health` | Liveness and version |
+| `POST /ontology/open` | Load an ontology from a file path |
+| `GET /hierarchy?parent=` | Direct subclasses of a class (or top-level classes) |
+| `GET /entity?iri=` | Label, annotations, and axioms of a class |
+| `GET /search?q=` | Search classes, properties, and individuals |
+| `GET /graph?depth=` | Class hierarchy slice as nodes and edges |
+
+All endpoints require the `X-Engine-Token` header.
+
+## UI
+
+- **Tree** view: lazy class hierarchy.
+- **Graph** view: React Flow canvas of the hierarchy, depth 1-3, click a node to open it.
+- Click any class to see annotations and axioms (DL syntax) in the right panel.
+
+## Status
+
+P0 spike: open, browse, search, graph. Editing, reasoning, and packaging are next.
+
+## History
+
+The previous Protégé Desktop code lives in the `legacy-protege` branch and the
+`pre-ontostudio` tag.

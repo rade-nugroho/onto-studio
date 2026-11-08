@@ -1,21 +1,42 @@
-## Git
-
-- Commit messages: concise imperative style, no `Co-Authored-By` trailers.
-- Branch from `main`.
+# Agent notes
 
 ## Project
 
-- Protege Desktop: a Java/Swing ontology editor on OSGi (Apache Felix), not a web app.
-- Root `pom.xml` modules: `protege-launcher`, `protege-common`, `protege-editor-core`, `protege-editor-owl`, `protege-desktop`.
-- Upstream is https://github.com/protegeproject/protege (https://protege.stanford.edu). This clone's origin is https://github.com/rade-nugroho/protege.git.
+Onto Studio: internal ontology workbench. React UI + Tauri shell + Java engine.
 
-## Build
+- `apps/ui` — React 18, TypeScript, Vite, React Flow (`@xyflow/react`)
+- `apps/desktop` — Tauri v2 (Rust), spawns the engine and passes port/token to the UI
+- `services/engine` — Java 21, Javalin 6, OWL API 5.5.1, shaded into `target/engine.jar`
 
-- JDK that can compile Java 11. The compiler plugin release is 11. GitHub Actions runs tests on JDK 11 and JDK 21.
-- Apache Maven 3.6.3 or newer.
-- From the repository root, build and test with `mvn --batch-mode clean verify`.
+## Build and test
 
-## Boundaries
+```bash
+# engine
+cd services/engine
+JAVA_HOME=$(/usr/libexec/java_home -v 21) mvn -q -DskipTests package
 
-- Do not change license terms or Code of Conduct obligations.
-- Vulnerability reports: follow `SECURITY.md`.
+# ui
+cd apps/ui
+npm install --no-audit --no-fund
+npm run build
+
+# shell
+cd apps/desktop/src-tauri
+cargo build
+```
+
+Full dev run: `./scripts/dev.sh`.
+
+## Conventions
+
+- Engine binds 127.0.0.1 only and requires `X-Engine-Token` on every request.
+- The engine prints a single JSON handshake line on stdout and logs to stderr.
+- `--watch-parent` makes the engine exit when its stdin pipe closes, so the shell
+  never leaves an orphan JVM behind.
+- UI calls the engine through `src/api.ts`; keep response shapes in sync with
+  `services/engine` JSON.
+
+## Git
+
+- Commit messages: concise imperative style, no `Co-Authored-By` trailers.
+- The old Protégé code is preserved in `legacy-protege` / `pre-ontostudio`.
