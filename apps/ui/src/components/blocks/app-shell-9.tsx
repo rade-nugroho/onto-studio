@@ -830,11 +830,13 @@ export default function AppShell9({
   children,
   sidebarOpen: sidebarOpenProp,
   onSidebarOpenChange,
+  sidebarWidth = "w-72",
 }: {
   sidebar?: ReactNode;
   children?: ReactNode;
   sidebarOpen?: boolean;
   onSidebarOpenChange?: (open: boolean) => void;
+  sidebarWidth?: string;
 } = {}) {
   const [model, setModel] = useState(MODELS[0]);
   const [chatId, setChatId] = useState<string | null>(null);
@@ -960,10 +962,10 @@ export default function AppShell9({
           {...({ inert: !sidebarOpen } as Record<string, unknown>)}
           className={cx(
             "hidden shrink-0 lg:block",
-            sidebarOpen ? "mr-3 w-72" : "mr-0 w-0 overflow-hidden",
+            sidebarOpen ? `mr-3 ${sidebarWidth}` : "mr-0 w-0 overflow-hidden",
           )}
         >
-          <div className={cx(frame, "h-full w-72")}>
+          <div className={cx(frame, `h-full ${sidebarWidth}`, sidebarWidth === "w-14" && "shell-rail")}>
             {sidebar ?? (
               <SidebarBody
                 model={model}

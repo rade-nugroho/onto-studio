@@ -26,7 +26,8 @@ export default function App() {
   const [entity, setEntity] = useState<EntityInfo | null>(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
-  const [view, setView] = useState<"tree" | "graph" | "assistant">("tree");
+  const [view, setView] = useState<"tree" | "graph">("tree");
+  const [assistantOpen, setAssistantOpen] = useState(false);
   const [depth, setDepth] = useState(2);
   const [dirty, setDirty] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
@@ -219,10 +220,15 @@ export default function App() {
       },
       { id: "tree", group: "View", title: "Show class tree", icon: LayoutTemplateIcon },
       { id: "graph", group: "View", title: "Show class graph", icon: LayoutTemplateIcon },
-      { id: "assistant", group: "View", title: "Show assistant", icon: SparklesIcon },
+      {
+        id: "assistant",
+        group: "View",
+        title: assistantOpen ? "Hide assistant" : "Show assistant",
+        icon: SparklesIcon,
+      },
       { id: "search", group: "Navigation", title: "Focus search", icon: Search01Icon },
     ],
-    [reasoning],
+    [reasoning, assistantOpen],
   );
 
   const runCommand = useCallback(
@@ -250,7 +256,7 @@ export default function App() {
           setView("graph");
           break;
         case "assistant":
-          setView("assistant");
+          setAssistantOpen((open) => !open);
           break;
         case "search":
           document.querySelector<HTMLInputElement>("input.search")?.focus();
@@ -268,6 +274,7 @@ export default function App() {
     <AppShell9
       sidebarOpen={sidebarOpen}
       onSidebarOpenChange={setSidebarOpen}
+      sidebarWidth="w-14"
       sidebar={
         <AppSidebar2
           brand="O"
@@ -293,6 +300,7 @@ export default function App() {
     >
     <div className="app">
       <header className="bar">
+        <button onClick={openFile}>Open ontology…</button>
         {!sidebarOpen && (
           <button
             className="sidebar-toggle"
@@ -309,12 +317,6 @@ export default function App() {
           </button>
           <button className={view === "graph" ? "active" : ""} onClick={() => setView("graph")}>
             Graph
-          </button>
-          <button
-            className={view === "assistant" ? "active" : ""}
-            onClick={() => setView("assistant")}
-          >
-            Assistant
           </button>
         </div>
         {view === "graph" && (
@@ -335,6 +337,14 @@ export default function App() {
             {ontology.axiomCount.toLocaleString()} axioms · {ontology.entityCount} entities
           </span>
         )}
+        <button
+          className={assistantOpen ? "active-toggle" : ""}
+          onClick={() => setAssistantOpen((open) => !open)}
+          aria-pressed={assistantOpen}
+          title={assistantOpen ? "Hide assistant" : "Show assistant"}
+        >
+          Assist
+        </button>
         <CommandMenu1 commands={commands} onRun={runCommand} defaultOpen={false} compact />
       </header>
 
@@ -351,15 +361,16 @@ export default function App() {
 
       <main
         className={view === "graph" ? "panes graph" : "panes"}
-        style={view === "assistant" ? { gridTemplateColumns: "1fr" } : undefined}
+        style={
+          assistantOpen
+            ? {
+                gridTemplateColumns:
+                  view === "graph" ? "minmax(0, 1fr) 320px 340px" : "300px minmax(0, 1fr) 340px",
+              }
+            : undefined
+        }
       >
-        {view === "assistant" ? (
-          <div className="canvas">
-            <Suspense fallback={null}>
-              <AiChat3 />
-            </Suspense>
-          </div>
-        ) : view === "graph" ? (
+        {view === "graph" ? (
           <div className="canvas">
             <GraphView
               depth={depth}
@@ -372,7 +383,12 @@ export default function App() {
           </div>
         ) : (
           <aside className="tree">
-            {roots.length === 0 && <div className="empty">No ontology open</div>}
+            {roots.length === 0 && (
+              <div className="empty empty-cta">
+                <p>No ontology open</p>
+                <button onClick={openFile}>Open ontology…</button>
+              </div>
+            )}
             {roots.map((node) => (
               <TreeItem
                 key={node.iri}
@@ -388,19 +404,30 @@ export default function App() {
           </aside>
         )}
 
-        {view !== "assistant" && (
-          <section className="detail">
-            {!entity && <div className="empty">Select a class to see its axioms</div>}
-            {entity && (
-              <EntityPanel
-                key={entity.iri + version}
-                entity={entity}
-                onEdited={onEdited}
-                onSelect={select}
-                onError={setError}
-              />
-            )}
-          </section>
+        <section className="detail">
+          {!entity && (
+            <div className="empty empty-cta">
+              <p>Select a class to see its axioms</p>
+              <button onClick={openFile}>Open ontology…</button>
+            </div>
+          )}
+          {entity && (
+            <EntityPanel
+              key={entity.iri + version}
+              entity={entity}
+              onEdited={onEdited}
+              onSelect={select}
+              onError={setError}
+            />
+          )}
+        </section>
+
+        {assistantOpen && (
+          <aside className="assistant">
+            <Suspense fallback={null}>
+              <AiChat3 />
+            </Suspense>
+          </aside>
         )}
       </main>
 

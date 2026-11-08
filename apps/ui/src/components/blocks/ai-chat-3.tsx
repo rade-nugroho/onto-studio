@@ -240,36 +240,9 @@ const CANNED_REPLY =
   "no definition yet. I can list every unlabeled class, propose definitions, " +
   "or draft a subclass axiom: tell me which class to start with.";
 
-const LIVE_ID = "a-seed";
-
-const SEED_MESSAGES: Message[] = [
-  { id: "u-1", role: "user", text: "Summarize this ontology" },
-  {
-    id: "a-1",
-    role: "assistant",
-    text: "The ontology covers pizza types and their toppings. Most classes carry a label, several have no definition, and a few siblings could share a parent.",
-  },
-  { id: "u-2", role: "user", text: "Which classes need work?" },
-  {
-    id: "a-2",
-    role: "assistant",
-    text: "PizzaTemperada, PizzaVegetariana, and ValorDaParticipacao have no comment. DomainConcept and Pais both sit at the top level with no shared parent.",
-  },
-  {
-    id: "u-3",
-    role: "user",
-    text: "Draft a subclass axiom",
-  },
-  {
-    id: LIVE_ID,
-    role: "assistant",
-    text: "PizzaTemperada SubClassOf Pizza, and PizzaVegetariana SubClassOf Pizza. Both keep their existing toppings.",
-  },
-];
-
 export default function AiChat3() {
   const reduced = useReducedMotion();
-  const [messages, setMessages] = useState<Message[]>(SEED_MESSAGES);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [liveId, setLiveId] = useState<string | null>(null);
   const [stopped, setStopped] = useState(false);
   const [value, setValue] = useState("");
@@ -355,12 +328,12 @@ export default function AiChat3() {
       className={cx(
         canvas,
         text1,
-        "relative flex h-full min-h-0 w-full flex-col overflow-hidden p-4 sm:p-6",
+        "relative flex h-full min-h-0 w-full flex-col overflow-hidden p-3",
       )}
     >
-      <div className={cx(panel, "mx-auto w-full max-w-sm flex-1")}>
+      <div className={cx(panel, "w-full min-w-0 flex-1")}>
         <div className={cx(panelHead, "h-12")}>
-          <span className={frameTitle}>Assistant</span>
+          <span className={frameTitle}>Assist agent</span>
           <span className={cx(statusWord, statusIdle, "ml-auto")}>Ready</span>
         </div>
 

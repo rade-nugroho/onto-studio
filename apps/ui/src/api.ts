@@ -70,14 +70,19 @@ async function engine(): Promise<EngineInfo> {
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const info = await engine();
-  const response = await fetch(`http://127.0.0.1:${info.port}${path}`, {
+  let response: Response;
+  try {
+    response = await fetch(`http://127.0.0.1:${info.port}${path}`, {
     ...init,
-    headers: {
-      "X-Engine-Token": info.token,
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-  });
+      headers: {
+        "X-Engine-Token": info.token,
+        "Content-Type": "application/json",
+        ...(init?.headers ?? {}),
+      },
+    });
+  } catch {
+    throw new Error("Engine is not reachable. Start it with ./scripts/dev.sh");
+  }
   if (!response.ok) {
     const body = await response.text();
     try {

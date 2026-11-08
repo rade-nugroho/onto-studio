@@ -267,7 +267,7 @@ export default function AppSidebar2({
           {(groups ?? railGroups).map((group, groupIndex) => (
             <ul
               key={groupIndex}
-              className="flex flex-col items-center gap-1"
+              className="flex list-none flex-col items-center gap-1"
               role="list"
             >
               {group.map((item) => {
