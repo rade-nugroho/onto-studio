@@ -667,12 +667,25 @@ public class OWLWorkspace extends TabbedWorkspace implements SendErrorReportHand
         final OWLModelManager mngr = getOWLModelManager();
 
         // Install the active ontology combo box
-        ontologiesList.setToolTipText("Active ontology");
+        JLabel ontologyLabel = new JLabel("Ontology");
+        ontologyLabel.setLabelFor(ontologiesList);
+        ontologyLabel.setToolTipText("The ontology open in this window.");
+        ontologiesList.setToolTipText("The ontology you are editing. Choose another one when several are open.");
         ontologiesList.setRenderer(new OWLOntologyCellRenderer(getOWLEditorKit()));
         rebuildOntologyDropDown();
 
-        topBarPanel.add(ontologiesList, new GridBagConstraints(
+        topBarPanel.add(ontologyLabel, new GridBagConstraints(
                 1, 0,
+                1, 1,
+                0, 0,
+                GridBagConstraints.BASELINE,
+                GridBagConstraints.NONE,
+                new Insets(0, 8, 0, 6),
+                0, 0
+        ));
+
+        topBarPanel.add(ontologiesList, new GridBagConstraints(
+                2, 0,
                 1, 1,
                 100, 0,
                 GridBagConstraints.BASELINE,
@@ -695,12 +708,12 @@ public class OWLWorkspace extends TabbedWorkspace implements SendErrorReportHand
         searchButton.setBackground(null);
         searchButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         searchButton.setRolloverEnabled(true);
-        searchButton.setToolTipText("Search");
+        searchButton.setToolTipText("Search for a class, property, or individual");
         searchButton.setRolloverIcon(new SearchIcon(OWLSystemColors.getRolloverForegroundColor()));
         searchButton.addActionListener(e -> showSearchDialog());
 
         topBarPanel.add(searchButton, new GridBagConstraints(
-                2, 0,
+                3, 0,
                 1, 1,
                 0, 0,
                 GridBagConstraints.BASELINE,
@@ -711,7 +724,7 @@ public class OWLWorkspace extends TabbedWorkspace implements SendErrorReportHand
 
         topBarPanel.add(backgroundTaskLabel,
                 new GridBagConstraints(
-                        3, 0,
+                        4, 0,
                         1, 1,
                         0, 0,
                         GridBagConstraints.EAST,
@@ -724,7 +737,7 @@ public class OWLWorkspace extends TabbedWorkspace implements SendErrorReportHand
         topBarPanel.add(breadCrumbView,
                         new GridBagConstraints(
                                 0, 1,
-                                4, 1,
+                                5, 1,
                                 100, 0,
                                 GridBagConstraints.BASELINE_LEADING,
                                 GridBagConstraints.HORIZONTAL,
@@ -786,11 +799,29 @@ public class OWLWorkspace extends TabbedWorkspace implements SendErrorReportHand
 
         String ontShortName = mngr.getRendering(activeOntology);
         com.google.common.base.Optional<IRI> defaultDocumentIRI = activeOntology.getOntologyID().getDefaultDocumentIRI();
+        if (isUnsavedNewOntology(activeOntology, locURI, defaultDocumentIRI)) {
+            return "New ontology (not saved)";
+        }
         String documentIRIPart = "";
         if (defaultDocumentIRI.isPresent()) {
             documentIRIPart = " (" + defaultDocumentIRI.get() + ") ";
         }
         return ontShortName + documentIRIPart + " : [" + location + "]";
+    }
+
+    /**
+     * A freshly created ontology still uses the generated untitled address and has not been written to a file.
+     */
+    private static boolean isUnsavedNewOntology(OWLOntology ontology,
+                                                URI locURI,
+                                                com.google.common.base.Optional<IRI> documentIRI) {
+        if (locURI != null && "file".equalsIgnoreCase(locURI.getScheme())) {
+            return false;
+        }
+        if (!documentIRI.isPresent() || ontology.getAxiomCount() != 0) {
+            return false;
+        }
+        return documentIRI.get().toString().contains("/untitled-ontology-");
     }
 
 
@@ -822,6 +853,7 @@ public class OWLWorkspace extends TabbedWorkspace implements SendErrorReportHand
 
     private void updateReasonerStatus(ReasonerStatus status) {
         reasonerStatus.setText(status.getDescription());
+        reasonerStatus.setToolTipText(status.getInitializationTooltip());
 
         startReasonerAction.setEnabled(status.isEnableInitialization());
         startReasonerAction.putValue(Action.SHORT_DESCRIPTION, status.getInitializationTooltip());

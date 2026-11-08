@@ -189,6 +189,7 @@ public class Wizard extends WindowAdapter implements PropertyChangeListener {
         }
         wizardDialog.setLocation((screenDimension.width - wizardDimension.width) / 2,
                                  (screenDimension.height - wizardDimension.height) / 2);
+        updateDefaultButton();
         wizardDialog.setVisible(true);
         return returnCode;
     }
@@ -279,6 +280,7 @@ public class Wizard extends WindowAdapter implements PropertyChangeListener {
         }
         else if (evt.getPropertyName().equals(WizardModel.NEXT_FINISH_BUTTON_ENABLED_PROPERTY)) {
             nextButton.setEnabled(((Boolean) evt.getNewValue()).booleanValue());
+            updateDefaultButton();
         }
         else if (evt.getPropertyName().equals(WizardModel.BACK_BUTTON_ENABLED_PROPERTY)) {
             backButton.setEnabled(((Boolean) evt.getNewValue()).booleanValue());
@@ -455,9 +457,24 @@ public class Wizard extends WindowAdapter implements PropertyChangeListener {
         buttonBox.add(cancelButton);
 
         buttonPanel.add(buttonBox, java.awt.BorderLayout.EAST);
+        updateDefaultButton();
 
         wizardDialog.getContentPane().add(buttonPanel, java.awt.BorderLayout.SOUTH);
         wizardDialog.getContentPane().add(cardPanel, java.awt.BorderLayout.CENTER);
+    }
+
+    /**
+     * Continue, or Finish on the last page, is the primary action.
+     */
+    private void updateDefaultButton() {
+        if (wizardDialog == null || nextButton == null) {
+            return;
+        }
+        JRootPane rootPane = wizardDialog.getRootPane();
+        if (rootPane == null) {
+            return;
+        }
+        rootPane.setDefaultButton(nextButton.isEnabled() ? nextButton : null);
     }
 
 
@@ -474,7 +491,7 @@ public class Wizard extends WindowAdapter implements PropertyChangeListener {
 
     static {
 
-        BACK_TEXT = "Go Back";
+        BACK_TEXT = "Back";
         NEXT_TEXT = "Continue";
         CANCEL_TEXT = "Cancel";
         FINISH_TEXT = "Finish";

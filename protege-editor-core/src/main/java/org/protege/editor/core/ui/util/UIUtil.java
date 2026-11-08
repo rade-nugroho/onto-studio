@@ -263,6 +263,16 @@ public class UIUtil {
 
 
     public static void openRequest(OpenRequestHandler handler) throws Exception {
+        openRequest(handler, "Open");
+    }
+
+    /**
+     * Asks whether a new or existing ontology should use this window or a new one.
+     *
+     * @param handler The open or create handler.
+     * @param action  The verb on the buttons, such as {@code Open} or {@code Create}.
+     */
+    public static void openRequest(OpenRequestHandler handler, String action) throws Exception {
         ProtegeManager pm = ProtegeManager.getInstance();
         EditorKitManager editorKitManager = pm.getEditorKitManager();
         if(editorKitManager.getEditorKitCount() == 1) {
@@ -272,12 +282,25 @@ public class UIUtil {
                 return;
             }
         }
-        int ret = JOptionPane.showConfirmDialog(handler.getCurrentWorkspace(), "Do you want to open the ontology in the current window?", "Open in current window", JOptionPane.YES_NO_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE);
-
-        if(ret == JOptionPane.YES_OPTION) {
+        String verb = action == null || action.trim().isEmpty() ? "Open" : action.trim();
+        String thisWindow = verb + " in this window";
+        String newWindow = verb + " in a new window";
+        String cancel = "Cancel";
+        Object[] options = {thisWindow, newWindow, cancel};
+        String message = thisWindow + " uses the window you are looking at.\n"
+                + newWindow + " opens a separate window and leaves this one as it is.";
+        int ret = JOptionPane.showOptionDialog(handler.getCurrentWorkspace(),
+                                               message,
+                                               verb + " ontology",
+                                               JOptionPane.DEFAULT_OPTION,
+                                               JOptionPane.QUESTION_MESSAGE,
+                                               null,
+                                               options,
+                                               thisWindow);
+        if(ret == 0) {
             handler.openInCurrentWorkspace();
         }
-        else if(ret == JOptionPane.NO_OPTION) {
+        else if(ret == 1) {
             handler.openInNewWorkspace();
         }
     }

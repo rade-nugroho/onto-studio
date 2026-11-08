@@ -179,7 +179,7 @@ public class OWLEditorKit extends AbstractEditorKit<OWLEditorKitFactory> {
 
     @Override
     public boolean handleLoadRequest() throws Exception {
-        File f = new UIHelper(this).chooseOWLFile("Select an OWL file");
+        File f = new UIHelper(this).chooseOWLFile("Open an ontology file");
         return f != null && handleLoadFrom(f.toURI());
     }
 
@@ -381,7 +381,7 @@ public class OWLEditorKit extends AbstractEditorKit<OWLEditorKitFactory> {
     private File getSaveAsOWLFile(@Nonnull OWLOntology ont, @Nonnull OWLDocumentFormat fmt) {
         UIHelper helper = new UIHelper(this);
         List<String> extensions = Extensions.getExtensions(fmt);
-        File file = helper.saveOWLFile(String.format("Please select a location in which to save: %s", getModelManager().getRendering(ont)),
+        File file = helper.saveOWLFile(String.format("Choose a file for this ontology: %s", getModelManager().getRendering(ont)),
                                        new HashSet<>(extensions));
         if (file != null) {
             int extensionIndex = file.toString().lastIndexOf('.');

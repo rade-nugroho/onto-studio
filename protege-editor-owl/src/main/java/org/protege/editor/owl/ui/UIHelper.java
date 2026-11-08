@@ -251,7 +251,7 @@ public class UIHelper {
         if (f == null) {
             f = new JFrame();
         }
-        return UIUtil.openFile(f, title, "OWL File", OWL_EXTENSIONS);
+        return UIUtil.openFile(f, title, "Ontology file", OWL_EXTENSIONS);
     }
 
 
@@ -263,7 +263,7 @@ public class UIHelper {
     public File saveOWLFile(String title, Set<String> extensions) {
         return UIUtil.saveFile((JFrame) SwingUtilities.getAncestorOfClass(JFrame.class, getParent()),
                                title,
-                               "OWL File",
+                               "Ontology file",
                                extensions);
     }
 

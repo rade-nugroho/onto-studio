@@ -352,6 +352,8 @@
 					<version>3.14.0</version>
 					<configuration>
 						<release>11</release>
+						<!-- JDK 23+ no longer runs annotation processors implicitly from the classpath -->
+						<proc>full</proc>
 					</configuration>
 				</plugin>
 

@@ -1537,6 +1537,14 @@
         <path value="org.protege.editor.core.application.menu.HelpMenu/SlotF-B"/>
         <editorKitId value="any"/>
     </extension>
+
+    <extension id="menu.TourGuideMenuItem" point="org.protege.editor.core.application.EditorKitMenuAction">
+        <name value="Start guided tour"/>
+        <toolTip value="A short pop-up tour of the main Prot\u00E9g\u00E9 window"/>
+        <class value="org.protege.editor.owl.ui.action.TourGuideAction"/>
+        <path value="org.protege.editor.core.application.menu.HelpMenu/SlotF-C"/>
+        <editorKitId value="OWLEditorKit"/>
+    </extension>
     <!--
 
     <extension id="SPARQLQueryTab">

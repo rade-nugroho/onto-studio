@@ -68,7 +68,7 @@ public class OWLEntityCreationPanel<T extends OWLEntity> extends JPanel implemen
         }
     });
 
-    private final AugmentedJTextField entityIRIField = new AugmentedJTextField(FIELD_WIDTH, "IRI (auto-generated)");
+    private final AugmentedJTextField entityIRIField = new AugmentedJTextField(FIELD_WIDTH, "Web address, filled in from the name");
 
     private final JTextArea messageArea = new JTextArea(1, FIELD_WIDTH);
 
@@ -122,7 +122,8 @@ public class OWLEntityCreationPanel<T extends OWLEntity> extends JPanel implemen
         holder.add(nameLabel, new GridBagConstraints(0, rowIndex, 1, 1, 0.0, 0.0, GridBagConstraints.BASELINE_TRAILING, GridBagConstraints.NONE, insets, 0, 0));
         nameLabel.setFont(nameLabel.getFont().deriveFont(Font.BOLD));
 
-        userSuppliedNameField = new AugmentedJTextField(30, "Short name or full IRI or Prefix-Name or OBO Id");
+        userSuppliedNameField = new AugmentedJTextField(30, "Enter a name");
+        userSuppliedNameField.setToolTipText("A short name is enough. Protege fills in the web address (IRI).");
         userSuppliedNameField.getDocument().addDocumentListener(new DocumentListener() {
             public void insertUpdate(DocumentEvent e) {
                 update();
@@ -137,6 +138,7 @@ public class OWLEntityCreationPanel<T extends OWLEntity> extends JPanel implemen
         });
 
 
+        nameLabel.setLabelFor(userSuppliedNameField);
         holder.add(userSuppliedNameField, new GridBagConstraints(1, rowIndex, 1, 1, 100.0, 0.0, GridBagConstraints.BASELINE_LEADING, GridBagConstraints.HORIZONTAL, insets, 0, 0));
 
 
@@ -145,6 +147,8 @@ public class OWLEntityCreationPanel<T extends OWLEntity> extends JPanel implemen
 
         rowIndex++;
         JLabel iriLabel = new JLabel("IRI");
+        iriLabel.setToolTipText("The web address (IRI) for this entity. Protege fills this in from the name.");
+        iriLabel.setLabelFor(entityIRIField);
         holder.add(iriLabel, new GridBagConstraints(0, rowIndex, 1, 1, 0.0, 0.0, GridBagConstraints.BASELINE_TRAILING, GridBagConstraints.NONE, insets, 0, 0));
         entityIRIField.setForeground(Color.GRAY);
         entityIRIField.setEditable(false);
@@ -152,11 +156,13 @@ public class OWLEntityCreationPanel<T extends OWLEntity> extends JPanel implemen
 
 
         rowIndex++;
-        holder.add(new JButton(new AbstractAction("New entity options...") {
+        AbstractAction nameOptions = new AbstractAction("Name options...") {
             public void actionPerformed(ActionEvent e) {
                 showEntityCreationPreferences();
             }
-        }), new GridBagConstraints(1, rowIndex, 1, 1, 0.0, 0.0, GridBagConstraints.EAST, GridBagConstraints.NONE, new Insets(7, 0, 0, 0), 0, 0));
+        };
+        nameOptions.putValue(Action.SHORT_DESCRIPTION, "Choose how a name becomes a web address (IRI).");
+        holder.add(new JButton(nameOptions), new GridBagConstraints(1, rowIndex, 1, 1, 0.0, 0.0, GridBagConstraints.EAST, GridBagConstraints.NONE, new Insets(7, 0, 0, 0), 0, 0));
 
 
         rowIndex++;

@@ -228,6 +228,7 @@ public class Launcher {
         logger.info("********************************************************************************");
         logger.info("**                                  Protege                                   **");
         logger.info("********************************************************************************");
+        logger.info("Starting Protege. The main window opens after plugins finish loading.");
         logger.info("");
     }
 

@@ -25,7 +25,7 @@ public class NewAction extends ProtegeAction implements OpenRequestHandler {
 
     public void actionPerformed(ActionEvent e) {
         try {
-            UIUtil.openRequest(this);
+            UIUtil.openRequest(this, "Create");
         }
         catch (Exception e1) {
             ErrorLogPanel.showErrorDialog(e1);

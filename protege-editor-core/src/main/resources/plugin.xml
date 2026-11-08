@@ -49,7 +49,7 @@
 
     <extension id="menu.file.new" 
                point="org.protege.editor.core.application.EditorKitMenuAction">
-        <name value="New..."/>
+        <name value="Create new ontology..."/>
         <toolTip value="Create a new empty ontology"/>
         <class value="org.protege.editor.core.ui.action.NewAction"/>
         <path value="org.protege.editor.core.application.menu.FileMenu/SlotAA-E"/>
@@ -59,8 +59,8 @@
 
     <extension id="menu.file.open" 
     		   point="org.protege.editor.core.application.EditorKitMenuAction">
-        <name value="Open..."/>
-        <toolTip value="Open an ontology"/>
+        <name value="Open ontology..."/>
+        <toolTip value="Open an ontology from a file"/>
         <class value="org.protege.editor.core.ui.action.OpenAction"/>
         <path value="org.protege.editor.core.application.menu.FileMenu/SlotAA-F"/>
         <editorKitId value="any"/>
@@ -69,8 +69,8 @@
 
     <extension id="menu.file.openrecent" 
                point="org.protege.editor.core.application.EditorKitMenuAction">
-        <name value="Open recent"/>
-        <toolTip value="Open a recent ontology"/>
+        <name value="Open recent ontology"/>
+        <toolTip value="Open an ontology you used recently"/>
         <class value="org.protege.editor.core.ui.action.OpenRecentAction"/>
         <path value="org.protege.editor.core.application.menu.FileMenu/SlotAA-Z"/>
         <editorKitId value="any"/>
@@ -89,7 +89,7 @@
 
     <extension id="menu.file.save" point="org.protege.editor.core.application.EditorKitMenuAction">
         <name value="Save"/>
-        <toolTip value="Save"/>
+        <toolTip value="Save the ontology"/>
         <class value="org.protege.editor.core.ui.action.SaveAction"/>
         <path value="org.protege.editor.core.application.menu.FileMenu/SlotAB-A"/>
         <editorKitId value="any"/>
@@ -98,7 +98,7 @@
 
     <extension id="menu.file.saveas" point="org.protege.editor.core.application.EditorKitMenuAction">
         <name value="Save as..."/>
-        <toolTip value="Save as"/>
+        <toolTip value="Save the ontology to a new file"/>
         <class value="org.protege.editor.core.ui.action.SaveAsAction"/>
         <path value="org.protege.editor.core.application.menu.FileMenu/SlotAB-B"/>
         <editorKitId value="any"/>

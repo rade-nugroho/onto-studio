@@ -10,6 +10,7 @@ import org.protege.editor.core.ui.workspace.Workspace;
 
 import javax.swing.*;
 import java.awt.event.ActionEvent;
+import java.util.List;
 
 
 /**
@@ -35,11 +36,19 @@ public class OpenRecentAction extends ProtegeDynamicAction {
 
     public void rebuildChildMenuItems(JMenu thisMenuItem) {
         RecentEditorKitManager man = RecentEditorKitManager.getInstance();
-        for (EditorKitDescriptor descriptor : man.getDescriptors()) {
-            thisMenuItem.add(new RecentEditorKitAction(descriptor));
+        List<EditorKitDescriptor> descriptors = man.getDescriptors();
+        if (descriptors.isEmpty()) {
+            JMenuItem emptyItem = new JMenuItem("No recent ontologies");
+            emptyItem.setEnabled(false);
+            thisMenuItem.add(emptyItem);
+        }
+        else {
+            for (EditorKitDescriptor descriptor : descriptors) {
+                thisMenuItem.add(new RecentEditorKitAction(descriptor));
+            }
         }
         thisMenuItem.addSeparator();
-        thisMenuItem.add(new AbstractAction("Clear menu") {
+        AbstractAction clearRecent = new AbstractAction("Clear recent list") {
             /**
              * 
              */
@@ -48,7 +57,9 @@ public class OpenRecentAction extends ProtegeDynamicAction {
             public void actionPerformed(ActionEvent e) {
                 RecentEditorKitManager.getInstance().clear();
             }
-        });
+        };
+        clearRecent.setEnabled(!descriptors.isEmpty());
+        thisMenuItem.add(clearRecent);
     }
 
 

@@ -27,11 +27,28 @@ Please include details about your configuration and environment:
 
 We will assign the correct labels to your issue after reviewing your issue.
 
-## Code Contributions
+## What to install
 
-Protégé is written using Java.  You can contribute by forking the GitHub repository and submitting a pull request.  
+- A JDK that can compile Java 11. The compiler plugin in `pom.xml` sets the release to 11. GitHub Actions runs the tests on JDK 11 and JDK 21.
+- Apache Maven 3.6.3 or newer. `pom.xml` requires this Maven version.
 
-Once you have submitted a pull request we will review your code and test it.  We may require you to make some changes to your code or the documentaiton of your code.  You should include automated tests with your code.
+## How to build
+
+From the repository root:
+
+```
+mvn --batch-mode clean verify
+```
+
+## How to run tests
+
+The same command runs the test suite. `.github/workflows/ci.yml` runs `mvn --batch-mode clean verify` with a profile (`default`, `ide`, or `release`) and `-Drelease.signing.disabled=true`. `.travis.yml` runs `mvn verify -B`.
+
+## How to propose a change
+
+Protégé is written using Java. Fork the GitHub repository and submit a pull request.
+
+Once you have submitted a pull request we will review your code and test it. We may require you to make some changes to your code or the documentation of your code. You should include automated tests with your code.
 
 ### What can I work on?
 

@@ -81,9 +81,13 @@ public class OWLOntologyAnnotationViewComponent extends AbstractOWLViewComponent
         JPanel ontologyIRIPanel = new JPanel(new GridBagLayout());
         add(ontologyIRIPanel, BorderLayout.NORTH);
         Insets insets = new Insets(0, 4, 2, 0);
-        ontologyIRIPanel.add(new LinkLabel(ONTOLOGY_IRI_FIELD_LABEL, e -> {
+        LinkLabel ontologyIriLabel = new LinkLabel(ONTOLOGY_IRI_FIELD_LABEL, e -> {
             showOntologyIRIDocumentation();
-        }), new GridBagConstraints(0, 0, 1, 1, 0.0, 0.0, GridBagConstraints.BASELINE_TRAILING, GridBagConstraints.NONE, insets, 0, 0));
+        });
+        ontologyIriLabel.setToolTipText("Web address that names this ontology. The suggested address is fine to start. Click for the specification.");
+        ontologyIriLabel.setLabelFor(ontologyIRIField);
+        ontologyIRIField.setToolTipText("Web address that names this ontology. The suggested address is fine to start.");
+        ontologyIRIPanel.add(ontologyIriLabel, new GridBagConstraints(0, 0, 1, 1, 0.0, 0.0, GridBagConstraints.BASELINE_TRAILING, GridBagConstraints.NONE, insets, 0, 0));
         ontologyIRIPanel.add(ontologyIRIField, new GridBagConstraints(1, 0, 1, 1, 100.0, 0.0, GridBagConstraints.BASELINE_LEADING, GridBagConstraints.HORIZONTAL, insets, 0, 0));
         ontologyIRIField.getDocument().addDocumentListener(new DocumentListener() {
             public void insertUpdate(DocumentEvent e) {
@@ -114,9 +118,13 @@ public class OWLOntologyAnnotationViewComponent extends AbstractOWLViewComponent
             handleComponentHierarchyChanged();
         });
 
-        ontologyIRIPanel.add(new LinkLabel(ONTOLOGY_VERSION_IRI_FIELD_LABEL, e -> {
+        LinkLabel versionIriLabel = new LinkLabel(ONTOLOGY_VERSION_IRI_FIELD_LABEL + " (optional)", e -> {
             showVersionIRIDocumentation();
-        }), new GridBagConstraints(0, 1, 1, 1, 0.0, 0.0, GridBagConstraints.BASELINE_TRAILING, GridBagConstraints.NONE, insets, 0, 0));
+        });
+        versionIriLabel.setToolTipText("Optional web address for this version. Leave blank if you only need one version.");
+        versionIriLabel.setLabelFor(ontologyVersionIRIField);
+        ontologyVersionIRIField.setToolTipText("Optional. Leave blank if this ontology does not need a separate version address.");
+        ontologyIRIPanel.add(versionIriLabel, new GridBagConstraints(0, 1, 1, 1, 0.0, 0.0, GridBagConstraints.BASELINE_TRAILING, GridBagConstraints.NONE, insets, 0, 0));
 
         ontologyIRIPanel.add(ontologyVersionIRIField, new GridBagConstraints(1, 1, 1, 1, 100.0, 0.0, GridBagConstraints.BASELINE_LEADING, GridBagConstraints.HORIZONTAL, insets, 0, 0));
 
@@ -133,6 +141,11 @@ public class OWLOntologyAnnotationViewComponent extends AbstractOWLViewComponent
             }
         });
 
+
+        JLabel nextStep = new JLabel("<html>Next: open the Entities tab to add a class or property, or use File &gt; Open ontology to open a file.</html>");
+        nextStep.setFont(nextStep.getFont().deriveFont(Font.PLAIN, 12f));
+        nextStep.setForeground(new Color(90, 90, 90));
+        ontologyIRIPanel.add(nextStep, new GridBagConstraints(0, 2, 2, 1, 100.0, 0.0, GridBagConstraints.BASELINE_LEADING, GridBagConstraints.HORIZONTAL, new Insets(8, 4, 0, 0), 0, 0));
 
         ontologyIRIPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 20, 0));
 
