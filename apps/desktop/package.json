@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "scripts": {
     "tauri": "tauri",
-    "build": "tauri build --bundles app --config tauri.package.conf.json"
+    "build": "tauri build --bundles app --config src-tauri/tauri.package.conf.json"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.1.0"
