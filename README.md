@@ -56,6 +56,9 @@ curl -H "X-Engine-Token: dev" "http://127.0.0.1:7717/graph?depth=2"
 | `GET /entity?iri=` | Label, annotations, and axioms of a class |
 | `GET /search?q=` | Search classes, properties, and individuals |
 | `GET /graph?depth=` | Class hierarchy slice as nodes and edges |
+| `POST /axiom/subclass` | Add a `SubClassOf` axiom |
+| `POST /axiom/subclass/remove` | Remove a `SubClassOf` axiom |
+| `POST /ontology/save` | Save to the opened file or a new path |
 
 All endpoints require the `X-Engine-Token` header.
 
@@ -67,7 +70,8 @@ All endpoints require the `X-Engine-Token` header.
 
 ## Status
 
-P0 spike: open, browse, search, graph. Editing, reasoning, and packaging are next.
+P1 core: open, browse, search, graph, edit superclasses, save.
+Reasoning, undo/redo, axiom editor, and packaging are next.
 
 ## History
 

@@ -13,9 +13,15 @@ export type TreeNode = {
   hasChildren: boolean;
 };
 
+export type SuperClass = {
+  iri: string;
+  label: string;
+};
+
 export type EntityInfo = {
   iri: string;
   label: string;
+  superClasses: SuperClass[];
   annotations: string[];
   axioms: string[];
 };
@@ -84,6 +90,21 @@ export const api = {
     call<GraphSlice>(
       `/graph?depth=${depth}${root ? `&root=${encodeURIComponent(root)}` : ""}`,
     ),
+  addSubclass: (sub: string, sup: string) =>
+    call<{ ok: boolean; dirty: boolean }>("/axiom/subclass", {
+      method: "POST",
+      body: JSON.stringify({ sub, sup }),
+    }),
+  removeSubclass: (sub: string, sup: string) =>
+    call<{ ok: boolean; dirty: boolean }>("/axiom/subclass/remove", {
+      method: "POST",
+      body: JSON.stringify({ sub, sup }),
+    }),
+  save: (path?: string) =>
+    call<{ ok: boolean; path: string; dirty: boolean }>("/ontology/save", {
+      method: "POST",
+      body: JSON.stringify(path ? { path } : {}),
+    }),
   search: (query: string) =>
     call<{ results: SearchResult[] }>(`/search?q=${encodeURIComponent(query)}`),
 };

@@ -13,7 +13,10 @@ import org.semanticweb.owlapi.model.OWLClassExpression;
 import org.semanticweb.owlapi.model.AxiomType;
 import org.semanticweb.owlapi.model.OWLDataFactory;
 import org.semanticweb.owlapi.model.OWLEntity;
+import org.semanticweb.owlapi.formats.RDFXMLDocumentFormat;
+import org.semanticweb.owlapi.model.AddAxiom;
 import org.semanticweb.owlapi.model.OWLOntology;
+import org.semanticweb.owlapi.model.RemoveAxiom;
 import org.semanticweb.owlapi.model.OWLOntologyManager;
 import org.semanticweb.owlapi.search.EntitySearcher;
 import org.semanticweb.owlapi.util.SimpleShortFormProvider;
@@ -39,6 +42,8 @@ public final class Workspace {
     private final OWLDataFactory dataFactory = manager.getOWLDataFactory();
     private final DLSyntaxObjectRenderer renderer = new DLSyntaxObjectRenderer();
     private OWLOntology ontology;
+    private File openedFile;
+    private boolean dirty;
 
     public Workspace() {
         renderer.setShortFormProvider(new SimpleShortFormProvider());
@@ -50,7 +55,16 @@ public final class Workspace {
             ctx.status(400).json(Map.of("error", "File not found: " + request.path()));
             return;
         }
-        ontology = manager.loadOntologyFromOntologyDocument(new FileDocumentSource(file));
+        manager.getOntologies().forEach(manager::removeOntology);
+        ontology = null;
+        try {
+            ontology = manager.loadOntologyFromOntologyDocument(new FileDocumentSource(file));
+        } catch (Exception error) {
+            ctx.status(400).json(Map.of("error", "Could not open " + file + ": " + error.getMessage()));
+            return;
+        }
+        openedFile = file;
+        dirty = false;
         ctx.json(Map.of(
                 "iri", ontology.getOntologyID().getOntologyIRI().map(IRI::toString).orElse(""),
                 "path", file.getAbsolutePath(),
@@ -90,6 +104,12 @@ public final class Workspace {
             return;
         }
         OWLClass cls = dataFactory.getOWLClass(IRI.create(iri));
+        List<Map<String, String>> superClasses = EntitySearcher.getSuperClasses(cls, ontology)
+                .filter(OWLClassExpression::isNamed)
+                .map(OWLClassExpression::asOWLClass)
+                .distinct()
+                .map(sup -> Map.of("iri", sup.getIRI().toString(), "label", label(sup)))
+                .toList();
         List<String> annotations = new ArrayList<>();
         for (OWLAnnotationProperty property : List.of(
                 dataFactory.getRDFSLabel(), dataFactory.getRDFSComment())) {
@@ -107,6 +127,7 @@ public final class Workspace {
         ctx.json(Map.of(
                 "iri", iri,
                 "label", label(cls),
+                "superClasses", superClasses,
                 "annotations", annotations,
                 "axioms", axioms));
     }
@@ -193,6 +214,49 @@ public final class Workspace {
                     });
         }
         ctx.json(Map.of("nodes", nodes, "edges", edges));
+    }
+
+    public synchronized void addSubclass(Main.SubclassRequest request, Context ctx) {
+        if (ontology == null) {
+            ctx.status(409).json(Map.of("error", "No ontology is open"));
+            return;
+        }
+        OWLClass sub = dataFactory.getOWLClass(IRI.create(request.sub()));
+        OWLClass sup = dataFactory.getOWLClass(IRI.create(request.sup()));
+        manager.applyChange(new AddAxiom(ontology, dataFactory.getOWLSubClassOfAxiom(sub, sup)));
+        dirty = true;
+        ctx.json(Map.of("ok", true, "dirty", dirty));
+    }
+
+    public synchronized void removeSubclass(Main.SubclassRequest request, Context ctx) {
+        if (ontology == null) {
+            ctx.status(409).json(Map.of("error", "No ontology is open"));
+            return;
+        }
+        OWLClass sub = dataFactory.getOWLClass(IRI.create(request.sub()));
+        OWLClass sup = dataFactory.getOWLClass(IRI.create(request.sup()));
+        manager.applyChange(new RemoveAxiom(ontology, dataFactory.getOWLSubClassOfAxiom(sub, sup)));
+        dirty = true;
+        ctx.json(Map.of("ok", true, "dirty", dirty));
+    }
+
+    public synchronized void save(Main.SaveRequest request, Context ctx) throws Exception {
+        if (ontology == null) {
+            ctx.status(409).json(Map.of("error", "No ontology is open"));
+            return;
+        }
+        File target = request.path() == null || request.path().isBlank()
+                ? openedFile
+                : new File(request.path());
+        if (target == null) {
+            ctx.status(400).json(Map.of("error", "No save path"));
+            return;
+        }
+        org.semanticweb.owlapi.model.OWLDocumentFormat format = manager.getOntologyFormat(ontology);
+        manager.saveOntology(ontology, format != null ? format : new RDFXMLDocumentFormat(), IRI.create(target));
+        openedFile = target;
+        dirty = false;
+        ctx.json(Map.of("ok", true, "path", target.getAbsolutePath(), "dirty", dirty));
     }
 
     private boolean isTopLevel(OWLClass cls) {

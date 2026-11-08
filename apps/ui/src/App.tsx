@@ -13,6 +13,10 @@ export default function App() {
   const [query, setQuery] = useState("");
   const [view, setView] = useState<"tree" | "graph">("tree");
   const [depth, setDepth] = useState(2);
+  const [dirty, setDirty] = useState(false);
+  const [version, setVersion] = useState(0);
+  const [newSuper, setNewSuper] = useState("");
+  const [suggestions, setSuggestions] = useState<SearchResult[]>([]);
   const [results, setResults] = useState<SearchResult[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,11 +34,17 @@ export default function App() {
   const openFile = useCallback(async () => {
     setError(null);
     try {
-      const { open } = await import("@tauri-apps/plugin-dialog");
-      const path = await open({
-        multiple: false,
-        filters: [{ name: "Ontology", extensions: ["owl", "ttl", "rdf", "xml", "ofn"] }],
-      });
+      let path: string | null = null;
+      try {
+        const { open } = await import("@tauri-apps/plugin-dialog");
+        path = await open({
+          multiple: false,
+          filters: [{ name: "Ontology", extensions: ["owl", "ttl", "rdf", "xml", "ofn"] }],
+        });
+      } catch {
+        // Browser dev mode has no native dialog.
+        path = window.prompt("Ontology file path");
+      }
       if (typeof path === "string") {
         const info = await api.open(path);
         setOntology(info);
@@ -74,6 +84,65 @@ export default function App() {
     }
   }, []);
 
+  const save = useCallback(async () => {
+    try {
+      const result = await api.save();
+      setDirty(result.dirty);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }, []);
+
+  const addSuper = useCallback(
+    async (sup: string) => {
+      if (!entity) {
+        return;
+      }
+      try {
+        await api.addSubclass(entity.iri, sup);
+        setEntity(await api.entity(entity.iri));
+        setDirty(true);
+        setVersion((v) => v + 1);
+        setNewSuper("");
+        setSuggestions([]);
+      } catch (e) {
+        setError((e as Error).message);
+      }
+    },
+    [entity],
+  );
+
+  const removeSuper = useCallback(
+    async (sup: string) => {
+      if (!entity) {
+        return;
+      }
+      try {
+        await api.removeSubclass(entity.iri, sup);
+        setEntity(await api.entity(entity.iri));
+        setDirty(true);
+        setVersion((v) => v + 1);
+      } catch (e) {
+        setError((e as Error).message);
+      }
+    },
+    [entity],
+  );
+
+  const suggestSupers = useCallback(async (value: string) => {
+    setNewSuper(value);
+    if (value.trim().length < 2) {
+      setSuggestions([]);
+      return;
+    }
+    try {
+      const found = (await api.search(value)).results.filter((r) => r.kind === "class");
+      setSuggestions(found.slice(0, 8));
+    } catch {
+      setSuggestions([]);
+    }
+  }, []);
+
   const runSearch = useCallback(async (value: string) => {
     setQuery(value);
     if (value.trim().length < 2) {
@@ -94,6 +163,9 @@ export default function App() {
       <header className="bar">
         <div className="brand">Onto Studio</div>
         <button onClick={openFile}>Open ontology…</button>
+        <button onClick={save} disabled={!ontology}>
+          Save{dirty ? " •" : ""}
+        </button>
         <div className="segmented">
           <button
             className={view === "tree" ? "active" : ""}
@@ -148,6 +220,7 @@ export default function App() {
           <div className="canvas">
             <GraphView
               depth={depth}
+              version={version}
               selected={selected}
               onSelect={select}
               onError={setError}
@@ -177,6 +250,33 @@ export default function App() {
             <>
               <h2>{entity.label}</h2>
               <div className="iri">{entity.iri}</div>
+              <div className="block">
+                <h3>Superclasses</h3>
+                {entity.superClasses.map((sup) => (
+                  <div key={sup.iri} className="line super">
+                    <span>{sup.label}</span>
+                    <button className="remove" onClick={() => removeSuper(sup.iri)}>
+                      ×
+                    </button>
+                  </div>
+                ))}
+                <div className="add-super">
+                  <input
+                    placeholder="Add superclass…"
+                    value={newSuper}
+                    onChange={(event) => suggestSupers(event.target.value)}
+                  />
+                  {suggestions.length > 0 && (
+                    <div className="suggestions">
+                      {suggestions.map((candidate) => (
+                        <button key={candidate.iri} onClick={() => addSuper(candidate.iri)}>
+                          {candidate.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
               {entity.annotations.length > 0 && (
                 <div className="block">
                   <h3>Annotations</h3>

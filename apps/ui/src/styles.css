@@ -241,3 +241,47 @@ h3 {
 .canvas .react-flow {
   height: 100%;
 }
+
+.super {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.remove {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  padding: 0 6px;
+  font-size: 14px;
+}
+
+.remove:hover {
+  color: #9b1c1c;
+}
+
+.add-super {
+  margin-top: 8px;
+  position: relative;
+}
+
+.add-super input {
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  font: inherit;
+  background: var(--bg);
+}
+
+.suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.suggestions button {
+  padding: 3px 8px;
+  font-size: 12px;
+}

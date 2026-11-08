@@ -45,6 +45,9 @@ public final class Main {
         app.get("/hierarchy", ctx -> workspace.hierarchy(ctx.queryParam("parent"), ctx));
         app.get("/entity", ctx -> workspace.entity(ctx.queryParam("iri"), ctx));
         app.get("/search", ctx -> workspace.search(ctx.queryParam("q"), ctx));
+        app.post("/axiom/subclass", ctx -> workspace.addSubclass(ctx.bodyAsClass(SubclassRequest.class), ctx));
+        app.post("/axiom/subclass/remove", ctx -> workspace.removeSubclass(ctx.bodyAsClass(SubclassRequest.class), ctx));
+        app.post("/ontology/save", ctx -> workspace.save(ctx.bodyAsClass(SaveRequest.class), ctx));
         app.get("/graph", ctx -> workspace.graph(
                 ctx.queryParam("root"),
                 ctx.queryParam("depth") == null ? 2 : Integer.parseInt(ctx.queryParam("depth")),
@@ -62,6 +65,12 @@ public final class Main {
     }
 
     public record OpenRequest(String path) {
+    }
+
+    public record SubclassRequest(String sub, String sup) {
+    }
+
+    public record SaveRequest(String path) {
     }
 
     /**

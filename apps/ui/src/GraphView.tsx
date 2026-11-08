@@ -16,6 +16,7 @@ import { api, type GraphSlice } from "./api";
 
 type GraphViewProps = {
   depth: number;
+  version: number;
   selected: string | null;
   onSelect: (iri: string) => void;
   onError: (message: string) => void;
@@ -79,7 +80,7 @@ function edgesOf(graph: GraphSlice): Edge[] {
   }));
 }
 
-function Canvas({ depth, selected, onSelect, onError }: GraphViewProps) {
+function Canvas({ depth, version, selected, onSelect, onError }: GraphViewProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
 
@@ -98,7 +99,7 @@ function Canvas({ depth, selected, onSelect, onError }: GraphViewProps) {
     return () => {
       cancelled = true;
     };
-  }, [depth, onError, setEdges, setNodes]);
+  }, [depth, version, onError, setEdges, setNodes]);
 
   const styledNodes = useMemo(
     () =>
