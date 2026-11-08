@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::io::{BufRead, BufReader};
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 
@@ -36,14 +37,28 @@ fn parse_handshake(line: &str) -> Result<EngineInfo, String> {
     })
 }
 
-fn spawn_engine() -> Engine {
-    let jar = std::env::var("ONTOSTUDIO_ENGINE_JAR").unwrap_or_else(|_| {
-        format!(
-            "{}/../../../services/engine/target/engine.jar",
-            env!("CARGO_MANIFEST_DIR")
-        )
-    });
-    let mut child = Command::new("java")
+/// Prefers the bundled runtime and jar, then falls back to a development build.
+fn resolve_engine(app: &tauri::AppHandle) -> (PathBuf, PathBuf) {
+    if let Ok(jar) = std::env::var("ONTOSTUDIO_ENGINE_JAR") {
+        return (PathBuf::from("java"), PathBuf::from(jar));
+    }
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let bundled_jar = resource_dir.join("resources/engine.jar");
+        let bundled_java = resource_dir.join("resources/jre/bin/java");
+        if bundled_jar.exists() && bundled_java.exists() {
+            return (bundled_java, bundled_jar);
+        }
+    }
+    let dev_jar = PathBuf::from(format!(
+        "{}/../../../services/engine/target/engine.jar",
+        env!("CARGO_MANIFEST_DIR")
+    ));
+    (PathBuf::from("java"), dev_jar)
+}
+
+fn spawn_engine(app: &tauri::AppHandle) -> Engine {
+    let (java, jar) = resolve_engine(app);
+    let mut child = Command::new(&java)
         .arg("-jar")
         .arg(&jar)
         .arg("--port")
@@ -53,7 +68,7 @@ fn spawn_engine() -> Engine {
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()
-        .unwrap_or_else(|error| panic!("failed to start engine at {jar}: {error}"));
+        .unwrap_or_else(|error| panic!("failed to start engine at {jar:?}: {error}"));
     let stdout = child.stdout.take().expect("engine stdout");
     let mut line = String::new();
     BufReader::new(stdout)
@@ -88,7 +103,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            app.manage(spawn_engine());
+            app.manage(spawn_engine(app.handle()));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![engine_info])

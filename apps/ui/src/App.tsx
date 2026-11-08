@@ -2,6 +2,16 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type EditState, type EntityInfo, type OntologyInfo, type SearchResult, type TreeNode } from "./api";
 import EntityPanel from "./EntityPanel";
 import GraphView from "./GraphView";
+import AppShell9 from "@/components/blocks/app-shell-9";
+import CommandMenu1, { type Command } from "@/components/blocks/command-menu-1";
+import {
+  ArrowDown01Icon,
+  CheckListIcon,
+  File02Icon,
+  LayoutTemplateIcon,
+  Search01Icon,
+  SparklesIcon,
+} from "@hugeicons/core-free-icons";
 
 type ChildrenByIri = Record<string, TreeNode[]>;
 
@@ -19,6 +29,7 @@ export default function App() {
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [reasoning, setReasoning] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [version, setVersion] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
@@ -191,30 +202,123 @@ export default function App() {
     }
   }, []);
 
+  const commands = useMemo<Command[]>(
+    () => [
+      { id: "open", group: "Ontology", title: "Open ontology…", icon: File02Icon, shortcut: "⌘O" },
+      { id: "save", group: "Ontology", title: "Save ontology", icon: CheckListIcon, shortcut: "⌘S" },
+      { id: "undo", group: "Edit", title: "Undo", icon: ArrowDown01Icon, shortcut: "⌘Z" },
+      { id: "redo", group: "Edit", title: "Redo", icon: ArrowDown01Icon, shortcut: "⌘⇧Z" },
+      {
+        id: "reasoner",
+        group: "View",
+        title: reasoning ? "Stop reasoner" : "Start reasoner",
+        icon: SparklesIcon,
+      },
+      { id: "tree", group: "View", title: "Show class tree", icon: LayoutTemplateIcon },
+      { id: "graph", group: "View", title: "Show class graph", icon: LayoutTemplateIcon },
+      { id: "search", group: "Navigation", title: "Focus search", icon: Search01Icon },
+    ],
+    [reasoning],
+  );
+
+  const runCommand = useCallback(
+    (id: string) => {
+      switch (id) {
+        case "open":
+          openFile();
+          break;
+        case "save":
+          save();
+          break;
+        case "undo":
+          undo();
+          break;
+        case "redo":
+          redo();
+          break;
+        case "reasoner":
+          toggleReasoner();
+          break;
+        case "tree":
+          setView("tree");
+          break;
+        case "graph":
+          setView("graph");
+          break;
+        case "search":
+          document.querySelector<HTMLInputElement>("input.search")?.focus();
+          break;
+        default:
+          break;
+      }
+    },
+    [openFile, redo, save, toggleReasoner, undo],
+  );
+
   const roots = useMemo(() => children["root"] ?? [], [children]);
 
   return (
+    <AppShell9
+      sidebarOpen={sidebarOpen}
+      onSidebarOpenChange={setSidebarOpen}
+      sidebar={
+        <div className="side">
+          <div className="side-head">
+            <div className="side-title">Onto Studio</div>
+            <button
+              className="side-collapse"
+              onClick={() => setSidebarOpen(false)}
+              title="Hide sidebar"
+              aria-label="Hide sidebar"
+            >
+              ‹
+            </button>
+          </div>
+          <div className="side-sub">{ontology ? ontology.path : "No ontology open"}</div>
+          {ontology && (
+            <div className="side-stats">
+              {ontology.axiomCount.toLocaleString()} axioms
+              <br />
+              {ontology.entityCount} entities
+            </div>
+          )}
+          <div className="side-actions">
+            <button onClick={openFile}>Open ontology…</button>
+            <button onClick={save} disabled={!ontology}>
+              Save{dirty ? " •" : ""}
+            </button>
+            <button onClick={undo} disabled={!canUndo}>
+              Undo
+            </button>
+            <button onClick={redo} disabled={!canRedo}>
+              Redo
+            </button>
+            <button
+              className={reasoning ? "active-toggle" : ""}
+              onClick={toggleReasoner}
+              disabled={!ontology}
+            >
+              {reasoning ? "Reasoning on" : "Start reasoner"}
+            </button>
+          </div>
+          <div className="side-hint">
+            ⌘Z undo · ⌘⇧Z redo · ⌘S save
+          </div>
+        </div>
+      }
+    >
     <div className="app">
       <header className="bar">
-        <div className="brand">Onto Studio</div>
-        <button onClick={openFile}>Open ontology…</button>
-        <button onClick={save} disabled={!ontology}>
-          Save{dirty ? " •" : ""}
-        </button>
-        <button onClick={undo} disabled={!canUndo} title="Undo (Cmd/Ctrl+Z)">
-          Undo
-        </button>
-        <button onClick={redo} disabled={!canRedo} title="Redo (Cmd/Ctrl+Shift+Z)">
-          Redo
-        </button>
-        <button
-          className={reasoning ? "active-toggle" : ""}
-          onClick={toggleReasoner}
-          disabled={!ontology}
-          title="Structural reasoner: show inferred hierarchy"
-        >
-          {reasoning ? "Reasoning on" : "Reason"}
-        </button>
+        {!sidebarOpen && (
+          <button
+            className="sidebar-toggle"
+            onClick={() => setSidebarOpen(true)}
+            title="Show sidebar"
+            aria-label="Show sidebar"
+          >
+            ☰
+          </button>
+        )}
         <div className="segmented">
           <button className={view === "tree" ? "active" : ""} onClick={() => setView("tree")}>
             Tree
@@ -241,6 +345,7 @@ export default function App() {
             {ontology.axiomCount.toLocaleString()} axioms · {ontology.entityCount} entities
           </span>
         )}
+        <CommandMenu1 commands={commands} onRun={runCommand} defaultOpen={false} compact />
       </header>
 
       {results.length > 0 && (
@@ -300,6 +405,7 @@ export default function App() {
 
       {error && <div className="error">{error}</div>}
     </div>
+    </AppShell9>
   );
 }
 

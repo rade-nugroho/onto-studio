@@ -79,7 +79,13 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
     },
   });
   if (!response.ok) {
-    throw new Error(await response.text());
+    const body = await response.text();
+    try {
+      const parsed = JSON.parse(body) as { error?: string };
+      throw new Error(parsed.error ?? body);
+    } catch (error) {
+      throw error instanceof Error ? error : new Error(body);
+    }
   }
   return response.json() as Promise<T>;
 }
