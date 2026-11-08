@@ -70,6 +70,11 @@ public final class Main {
         app.post("/undo", workspace::undo);
         app.post("/redo", workspace::redo);
         app.get("/history", workspace::history);
+        Assistant assistant = new Assistant(workspace);
+        app.post("/assistant", ctx -> {
+            AssistantRequest request = ctx.bodyAsClass(AssistantRequest.class);
+            assistant.answer(request.question(), request.entityIri(), ctx);
+        });
         app.get("/graph", ctx -> workspace.graph(
                 ctx.queryParam("root"),
                 ctx.queryParam("depth") == null ? 2 : Integer.parseInt(ctx.queryParam("depth")),
@@ -94,6 +99,9 @@ public final class Main {
     }
 
     public record RenderedAxiomRequest(String iri, String text) {
+    }
+
+    public record AssistantRequest(String question, String entityIri) {
     }
 
     /**

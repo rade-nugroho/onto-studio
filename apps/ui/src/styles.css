@@ -518,3 +518,66 @@ h2 .kind {
 .shell-rail {
   overflow: visible !important;
 }
+
+.assistant-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.assistant-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+}
+
+.assistant-log {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.turn {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--accent-soft);
+  border-radius: 12px;
+  align-self: flex-start;
+  max-width: 92%;
+  white-space: pre-wrap;
+}
+
+.turn.user {
+  background: var(--accent);
+  color: #fff;
+  align-self: flex-end;
+}
+
+.assistant-composer {
+  display: flex;
+  gap: 8px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--border);
+}
+
+.assistant-composer input {
+  flex: 1;
+  min-width: 0;
+  height: 38px;
+  padding: 8px 14px;
+  border-radius: 9999px;
+  border: 1px solid var(--border);
+  font: inherit;
+  outline: none;
+}
+
+.assistant-composer input:focus {
+  border-color: var(--cyan);
+  box-shadow: 0 0 0 3px rgba(43, 130, 158, 0.15);
+}

@@ -440,6 +440,37 @@ public final class Workspace {
         ctx.json(state());
     }
 
+    /**
+     * Deterministic ontology summary for the assistant: identity, size,
+     * top-level classes, and (optionally) the axioms of one entity.
+     */
+    public synchronized String ontologyContext(String entityIri) {
+        if (ontology == null) {
+            return "No ontology is open.";
+        }
+        StringBuilder context = new StringBuilder();
+        context.append("Ontology: ")
+                .append(ontology.getOntologyID().getOntologyIRI().map(IRI::toString).orElse("anonymous"))
+                .append("\nAxioms: ").append(ontology.getAxiomCount())
+                .append("\nEntities: ").append(ontology.getSignature().size())
+                .append("\nTop-level classes: ");
+        List<String> topLevel = ontology.classesInSignature().filter(this::isTopLevel)
+                .limit(20).map(cls -> label(cls)).toList();
+        context.append(String.join(", ", topLevel));
+        if (entityIri != null && !entityIri.isBlank()) {
+            ontology.signature()
+                    .filter(entity -> entity.getIRI().toString().equals(entityIri))
+                    .findFirst()
+                    .ifPresent(entity -> {
+                        context.append("\n\nSelected entity: ").append(label(entity))
+                                .append(" (").append(kind(entity)).append(")")
+                                .append("\nIts axioms:");
+                        axiomsOf(entity).forEach(axiom -> context.append("\n- ").append(axiom));
+                    });
+        }
+        return context.toString();
+    }
+
     private List<OWLAxiom> parseFrames(String text) {
         ManchesterOWLSyntaxEditorParser parser = new ManchesterOWLSyntaxEditorParser(dataFactory, text);
         parser.setDefaultOntology(ontology);

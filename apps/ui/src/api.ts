@@ -140,6 +140,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ iri, text }),
     }),
+  assistant: (question: string, entityIri?: string | null) =>
+    call<{ answer: string }>("/assistant", {
+      method: "POST",
+      body: JSON.stringify({ question, entityIri: entityIri ?? null }),
+    }),
   undo: () => call<EditState>("/undo", { method: "POST" }),
   redo: () => call<EditState>("/redo", { method: "POST" }),
   history: () => call<EditState>("/history"),

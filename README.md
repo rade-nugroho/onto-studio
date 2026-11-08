@@ -70,8 +70,11 @@ All endpoints require the `X-Engine-Token` header.
 
 ## Status
 
-P1 core: open, browse, search, graph, edit superclasses, save.
-Reasoning, undo/redo, axiom editor, and packaging are next.
+P0-P4 done: open, browse, search, graph, editing (superclass + free Manchester
+axioms, properties/individuals), undo/redo, structural reasoner, command
+palette (Cmd+K), keyboard shortcuts (Cmd+Z/S/1/2), assistant grounded in the
+ontology (Anthropic SDK, needs `ANTHROPIC_API_KEY`), and a packaged macOS app
+with a bundled Java runtime (`scripts/package.sh`).
 
 ## History
 

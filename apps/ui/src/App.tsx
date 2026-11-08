@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type EditState, type EntityInfo, type OntologyInfo, type SearchResult, type TreeNode } from "./api";
 import EntityPanel from "./EntityPanel";
 import GraphView from "./GraphView";
@@ -6,7 +6,7 @@ import AppShell9 from "@/components/blocks/app-shell-9";
 import CommandMenu1, { type Command } from "@/components/blocks/command-menu-1";
 import AppSidebar2 from "@/components/blocks/app-sidebar-2";
 
-const AiChat3 = lazy(() => import("@/components/blocks/ai-chat-3"));
+import AssistantPanel from "./AssistantPanel";
 import {
   ArrowDown01Icon,
   CheckListIcon,
@@ -187,6 +187,12 @@ export default function App() {
       } else if (key === "s") {
         event.preventDefault();
         save();
+      } else if (key === "1") {
+        event.preventDefault();
+        setView("tree");
+      } else if (key === "2") {
+        event.preventDefault();
+        setView("graph");
       }
     };
     window.addEventListener("keydown", handler);
@@ -424,9 +430,7 @@ export default function App() {
 
         {assistantOpen && (
           <aside className="assistant">
-            <Suspense fallback={null}>
-              <AiChat3 />
-            </Suspense>
+            <AssistantPanel entityIri={selected} entityLabel={entity?.label ?? null} />
           </aside>
         )}
       </main>
