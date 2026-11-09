@@ -137,6 +137,53 @@ class EngineApiTest {
     }
 
     @Test
+    void catalogEntriesAreSignedAndInstalled(@TempDir Path home) throws Exception {
+        Files.createDirectories(home.resolve(".onto-studio"));
+        Files.writeString(home.resolve(".onto-studio.env"), "ONTO_STUDIO_CATALOG_KEY=test-key\n");
+        byte[] bytes = "catalog jar".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        com.sun.net.httpserver.HttpServer http = com.sun.net.httpserver.HttpServer.create(
+                new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        http.createContext("/plugin.jar", exchange -> {
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        http.start();
+        String url = "http://127.0.0.1:" + http.getAddress().getPort() + "/plugin.jar";
+        String digest = sha256Hex(bytes);
+        String previousHome = System.getProperty("user.home");
+        System.setProperty("user.home", home.toString());
+        try {
+            JavalinTest.test(Main.createApp(new Workspace(), "test"), (server, client) -> {
+                String added = body(client.post("/plugins/catalog/add",
+                        "{\"name\":\"sample\",\"url\":\"" + url + "\",\"sha256\":\"" + digest + "\"}",
+                        HEADERS));
+                assertTrue(added.contains("signature"), added);
+
+                String catalog = body(client.get("/plugins/catalog", HEADERS));
+                assertTrue(catalog.contains("\"valid\":true"), catalog);
+
+                String installed = body(client.post("/plugins/catalog/install",
+                        "{\"name\":\"sample\"}", HEADERS));
+                assertTrue(installed.contains("installed"), installed);
+            });
+
+            Path catalogFile = home.resolve(".onto-studio/plugins/catalog.json");
+            Files.writeString(catalogFile, "{\"sample\":{\"url\":\"" + url
+                    + "\",\"sha256\":\"" + digest + "\",\"signature\":\"deadbeef\"}}");
+
+            JavalinTest.test(Main.createApp(new Workspace(), "test"), (server, client) -> {
+                String rejected = body(client.post("/plugins/catalog/install",
+                        "{\"name\":\"sample\"}", HEADERS));
+                assertTrue(rejected.contains("signature is invalid"), rejected);
+            });
+        } finally {
+            System.setProperty("user.home", previousHome);
+            http.stop(0);
+        }
+    }
+
+    @Test
     void pluginsWithoutGrantedPermissionsAreSkipped() {
         JavalinTest.test(Main.createApp(new Workspace(), "test"), (server, client) -> {
             open(client);

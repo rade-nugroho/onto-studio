@@ -70,6 +70,7 @@ public final class Workspace implements Plugin.PluginContext {
     private EvidenceStore evidence;
     private MarkingStore markings;
     private final List<Plugin> plugins = new ArrayList<>(PluginLoader.load());
+    private final PluginCatalog catalog = new PluginCatalog(PluginCatalog.defaultPath());
     private OWLReasoner reasoner;
     private File openedFile;
     private int savedDepth;
@@ -863,8 +864,46 @@ public final class Workspace implements Plugin.PluginContext {
      * exact artifact it trusts.
      */
     public synchronized void installPlugin(Main.PluginInstallRequest request, Context ctx) {
-        if (request.url() == null || request.url().isBlank()
-                || request.sha256() == null || request.sha256().isBlank()) {
+        installFromUrl(request.url(), request.sha256(), ctx);
+    }
+
+    public synchronized void catalog(Context ctx) {
+        ctx.json(Map.of("entries", catalog.all().entrySet().stream().map(entry -> Map.of(
+                "name", entry.getKey(),
+                "url", entry.getValue().url(),
+                "sha256", entry.getValue().sha256(),
+                "valid", catalog.verify(entry.getKey(), entry.getValue()))).toList()));
+    }
+
+    public synchronized void addCatalogEntry(Main.CatalogEntryRequest request, Context ctx) {
+        if (request.name() == null || request.url() == null || request.sha256() == null) {
+            ctx.status(400).json(Map.of("error", "name, url and sha256 are required"));
+            return;
+        }
+        try {
+            PluginCatalog.Entry entry = catalog.add(request.name(), request.url(), request.sha256());
+            ctx.json(Map.of("name", request.name(), "signature", entry.signature()));
+        } catch (IllegalStateException error) {
+            ctx.status(400).json(Map.of("error", error.getMessage()));
+        }
+    }
+
+    public synchronized void installFromCatalog(Main.CatalogInstallRequest request, Context ctx) {
+        String name = request.name() == null ? "" : request.name().trim();
+        PluginCatalog.Entry entry = catalog.get(name);
+        if (entry == null) {
+            ctx.status(404).json(Map.of("error", "Unknown catalog entry: " + name));
+            return;
+        }
+        if (!catalog.verify(name, entry)) {
+            ctx.status(400).json(Map.of("error", "Catalog signature is invalid for " + name));
+            return;
+        }
+        installFromUrl(entry.url(), entry.sha256(), ctx);
+    }
+
+    private void installFromUrl(String url, String sha256Value, Context ctx) {
+        if (url == null || url.isBlank() || sha256Value == null || sha256Value.isBlank()) {
             ctx.status(400).json(Map.of("error", "Both url and sha256 are required"));
             return;
         }
@@ -872,7 +911,7 @@ public final class Workspace implements Plugin.PluginContext {
         try {
             var client = java.net.http.HttpClient.newHttpClient();
             var httpRequest = java.net.http.HttpRequest.newBuilder()
-                    .uri(java.net.URI.create(request.url()))
+                    .uri(java.net.URI.create(url))
                     .timeout(java.time.Duration.ofSeconds(30))
                     .GET()
                     .build();
@@ -891,12 +930,12 @@ public final class Workspace implements Plugin.PluginContext {
             return;
         }
         String digest = sha256(bytes);
-        if (!digest.equalsIgnoreCase(request.sha256().trim())) {
+        if (!digest.equalsIgnoreCase(sha256Value.trim())) {
             ctx.status(400).json(Map.of("error", "Checksum mismatch",
-                    "expected", request.sha256().trim(), "actual", digest));
+                    "expected", sha256Value.trim(), "actual", digest));
             return;
         }
-        String fileName = request.url().substring(request.url().lastIndexOf('/') + 1);
+        String fileName = url.substring(url.lastIndexOf('/') + 1);
         if (!fileName.endsWith(".jar")) {
             fileName = "plugin-" + digest.substring(0, 8) + ".jar";
         }

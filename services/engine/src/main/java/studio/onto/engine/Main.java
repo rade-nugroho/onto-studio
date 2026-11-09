@@ -97,6 +97,11 @@ public final class Main {
         app.get("/plugins", workspace::plugins);
         app.post("/plugins/install", ctx -> workspace.installPlugin(
                 ctx.bodyAsClass(PluginInstallRequest.class), ctx));
+        app.get("/plugins/catalog", workspace::catalog);
+        app.post("/plugins/catalog/add", ctx -> workspace.addCatalogEntry(
+                ctx.bodyAsClass(CatalogEntryRequest.class), ctx));
+        app.post("/plugins/catalog/install", ctx -> workspace.installFromCatalog(
+                ctx.bodyAsClass(CatalogInstallRequest.class), ctx));
         app.post("/axiom/remove-text", ctx -> workspace.removeAxiomText(ctx.bodyAsClass(AxiomTextRequest.class), ctx));
         app.post("/axiom/remove-rendered", ctx -> workspace.removeRenderedAxiom(ctx.bodyAsClass(RenderedAxiomRequest.class), ctx));
         app.post("/undo", workspace::undo);
@@ -162,6 +167,12 @@ public final class Main {
     }
 
     public record PluginInstallRequest(String url, String sha256) {
+    }
+
+    public record CatalogEntryRequest(String name, String url, String sha256) {
+    }
+
+    public record CatalogInstallRequest(String name) {
     }
 
     /**
