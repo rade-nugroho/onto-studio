@@ -30,7 +30,9 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.time.Duration;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -57,6 +59,7 @@ public final class Assistant {
             """;
 
     private static final int MAX_TOOL_OUTPUT = 20_000;
+    private static final String DEFAULT_MODEL = "claude-sonnet-5";
     private static final AnthropicBeta BETA = AnthropicBeta.MANAGED_AGENTS_2026_04_01;
     private static final Duration TOOL_TIMEOUT = Duration.ofSeconds(30);
     private static final Duration SESSION_BUDGET = Duration.ofMinutes(2);
@@ -73,6 +76,7 @@ public final class Assistant {
     private String environmentId;
     private String sessionId;
     private String sessionPath;
+    private String configSignature;
 
     public Assistant(Workspace workspace) {
         this.workspace = workspace;
@@ -162,6 +166,12 @@ public final class Assistant {
     }
 
     private void ensureResources(AnthropicClient client) {
+        String signature = configSignature();
+        if (agentId != null && !signature.equals(configSignature)) {
+            agentId = null;
+            sessionId = null;
+            sessionPath = null;
+        }
         if (agentId != null && environmentId != null) {
             return;
         }
@@ -182,12 +192,32 @@ public final class Assistant {
                     .addBeta(BETA)
                     .name("Onto Studio Assistant")
                     .description("Ontology assistant for Onto Studio. Inspects and edits the open OWL ontology.")
-                    .model(BetaManagedAgentsModel.CLAUDE_SONNET_5)
+                    .model(BetaManagedAgentsModel.of(modelId()))
                     .system(SYSTEM_PROMPT);
             tools().forEach(builder::addTool);
             agentId = client.beta().agents().create(builder.build()).id();
         }
+        configSignature = signature;
         saveState();
+    }
+
+    private static String modelId() {
+        String configured = System.getenv("ANTHROPIC_MODEL");
+        return configured == null || configured.isBlank() ? DEFAULT_MODEL : configured.trim();
+    }
+
+    private static String configSignature() {
+        String tools = tools().stream()
+                .map(BetaManagedAgentsCustomToolParams::name)
+                .reduce("", (left, right) -> left + "," + right);
+        try {
+            byte[] hash = MessageDigest.getInstance("SHA-256")
+                    .digest((modelId() + "\n" + SYSTEM_PROMPT + "\n" + tools)
+                            .getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(hash);
+        } catch (Exception ignored) {
+            return modelId();
+        }
     }
 
     private void ensureSession(AnthropicClient client) {
@@ -374,6 +404,7 @@ public final class Assistant {
             environmentId = state.get("environmentId");
             sessionId = state.get("sessionId");
             sessionPath = state.get("sessionPath");
+            configSignature = state.get("configSignature");
         } catch (Exception ignored) {
             // A corrupt cache only costs one extra agent/environment creation.
         }
@@ -387,6 +418,7 @@ public final class Assistant {
             put(state, "environmentId", environmentId);
             put(state, "sessionId", sessionId);
             put(state, "sessionPath", sessionPath);
+            put(state, "configSignature", configSignature);
             mapper.writeValue(stateFile.toFile(), state);
         } catch (Exception ignored) {
             // The assistant still works without the cache.
