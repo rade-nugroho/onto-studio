@@ -248,7 +248,7 @@ export default function AppSidebar2({
       className={cx(
         canvas,
         text1,
-        "relative flex h-full min-h-[640px] w-full overflow-hidden",
+        "relative flex h-full min-h-0 w-full overflow-visible",
       )}
     >
       <aside
@@ -267,7 +267,7 @@ export default function AppSidebar2({
           {(groups ?? railGroups).map((group, groupIndex) => (
             <ul
               key={groupIndex}
-              className="flex list-none flex-col items-center gap-1"
+              className="flex w-full list-none flex-col items-center gap-1"
               role="list"
             >
               {group.map((item) => {
@@ -275,7 +275,7 @@ export default function AppSidebar2({
                 return (
                   <li
                     key={item.label}
-                    className="relative"
+                    className="relative w-full"
                     onPointerEnter={(event) => hoverOpen(item.label, event)}
                     onPointerLeave={(event) => hoverClose(item.label, event)}
                   >
@@ -314,7 +314,7 @@ export default function AppSidebar2({
           ))}
         </nav>
 
-        <div className="mt-4 flex flex-col items-center gap-1">
+        <div className="mt-4 flex w-full flex-col items-center gap-1">
           {(
             [
               {
@@ -328,7 +328,7 @@ export default function AppSidebar2({
             return (
               <div
                 key={item.label}
-                className="relative"
+                className="relative w-full"
                 onPointerEnter={(event) => hoverOpen(item.label, event)}
                 onPointerLeave={(event) => hoverClose(item.label, event)}
               >
@@ -363,7 +363,7 @@ export default function AppSidebar2({
           })}
 
           <div
-            className="relative"
+            className="relative flex w-full justify-center"
             onPointerEnter={(event) => hoverOpen("Account", event)}
             onPointerLeave={(event) => hoverClose("Account", event)}
           >

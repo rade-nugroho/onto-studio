@@ -30,8 +30,9 @@ passes the port and session token to the UI through the `engine_info` command.
 
 ## Assistant configuration
 
-The assistant reads `.env.local` (working directory or next to the engine jar),
-falling back to the process environment:
+The assistant reads credentials from, in order: the process environment, a
+`.env.local` in the working directory (or up to two levels above), `.env.local`
+next to the engine jar, and `~/.onto-studio.env` for the packaged app:
 
 ```
 ANTHROPIC_API_KEY=...

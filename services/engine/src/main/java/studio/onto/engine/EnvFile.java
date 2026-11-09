@@ -39,6 +39,10 @@ public final class EnvFile {
         paths.add(cwd.resolve(".env.local"));
         paths.add(cwd.resolve("../.env.local"));
         paths.add(cwd.resolve("../../.env.local"));
+        String home = System.getProperty("user.home");
+        if (home != null) {
+            paths.add(Path.of(home, ".onto-studio.env"));
+        }
         try {
             Path jar = Path.of(EnvFile.class.getProtectionDomain()
                     .getCodeSource().getLocation().toURI()).getParent();

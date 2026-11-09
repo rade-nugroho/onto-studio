@@ -954,12 +954,12 @@ export default function AppShell9({
       className={cx(
         canvas,
         text1,
-        "relative flex h-full min-h-[720px] w-full overflow-hidden",
+        "relative flex h-full min-h-0 w-full overflow-hidden",
       )}
     >
       <div className={cx(pageFog, "flex h-full w-full min-w-0 p-3")}>
         <aside
-          {...({ inert: !sidebarOpen } as Record<string, unknown>)}
+          {...(!sidebarOpen ? ({ inert: "" } as Record<string, unknown>) : {})}
           className={cx(
             "hidden shrink-0 lg:block",
             sidebarOpen ? `mr-3 ${sidebarWidth}` : "mr-0 w-0 overflow-hidden",
