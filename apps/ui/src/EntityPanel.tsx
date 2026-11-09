@@ -136,8 +136,36 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
     <>
       <h2>
         {entity.label} <span className="kind">{entity.kind}</span>
+        <select
+          className={`marking ${entity.marking}`}
+          value={entity.marking}
+          onChange={async (event) => {
+            try {
+              await api.setMarking(entity.iri, event.target.value);
+              onEdited({ dirty: true, canUndo: true, canRedo: false });
+            } catch (error) {
+              onError((error as Error).message);
+            }
+          }}
+        >
+          <option value="public">public</option>
+          <option value="internal">internal</option>
+          <option value="restricted">restricted</option>
+        </select>
       </h2>
       <div className="iri">{entity.iri}</div>
+      <div className="usage">{entity.usage} referencing axioms</div>
+
+      {entity.kind === "class" && (
+        <Section title="Subclasses">
+          {entity.subClasses.length === 0 && <div className="muted">None</div>}
+          {entity.subClasses.map((sub) => (
+            <button key={sub.iri} className="link" onClick={() => onSelect(sub.iri)}>
+              {sub.label}
+            </button>
+          ))}
+        </Section>
+      )}
 
       {entity.kind === "class" && (
         <Section title="Superclasses">

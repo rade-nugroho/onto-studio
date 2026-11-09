@@ -22,7 +22,10 @@ export type EntityInfo = {
   iri: string;
   label: string;
   kind: string;
+  marking: string;
+  usage: number;
   superClasses: Ref[];
+  subClasses: Ref[];
   domains: Ref[];
   ranges: Ref[];
   types: Ref[];
@@ -205,6 +208,16 @@ export const api = {
       body: JSON.stringify({ action, params, reason }),
     }),
   audit: () => call<{ rows: AuditRow[] }>("/audit"),
+  setMarking: (iri: string, marking: string) =>
+    call<{ iri: string; marking: string }>("/marking/set", {
+      method: "POST",
+      body: JSON.stringify({ iri, marking }),
+    }),
+  exportOntology: (path: string, includeRestricted = false) =>
+    call<{ path: string; axioms: number; skipped: number }>("/export", {
+      method: "POST",
+      body: JSON.stringify({ path, includeRestricted }),
+    }),
   branches: () => call<{ branches: BranchInfo[] }>("/branch/list"),
   createBranch: (name: string) =>
     call<{ name: string; axioms: number }>("/branch/create", {

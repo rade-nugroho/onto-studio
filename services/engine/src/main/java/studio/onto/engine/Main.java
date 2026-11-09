@@ -81,6 +81,9 @@ public final class Main {
         app.post("/action/preview", ctx -> workspace.previewAction(ctx.bodyAsClass(ActionRequest.class), ctx));
         app.post("/action/commit", ctx -> workspace.commitAction(ctx.bodyAsClass(ActionRequest.class), ctx));
         app.get("/audit", workspace::audit);
+        app.get("/marking", ctx -> workspace.getMarking(ctx.queryParam("iri"), ctx));
+        app.post("/marking/set", ctx -> workspace.setMarking(ctx.bodyAsClass(MarkingRequest.class), ctx));
+        app.post("/export", ctx -> workspace.export(ctx.bodyAsClass(ExportRequest.class), ctx));
         app.post("/branch/create", ctx -> workspace.createBranch(ctx.bodyAsClass(BranchRequest.class), ctx));
         app.post("/branch/switch", ctx -> workspace.switchBranch(ctx.bodyAsClass(BranchRequest.class), ctx));
         app.get("/branch/list", workspace::listBranches);
@@ -125,6 +128,12 @@ public final class Main {
     }
 
     public record BranchRequest(String name, String reason) {
+    }
+
+    public record MarkingRequest(String iri, String marking) {
+    }
+
+    public record ExportRequest(String path, Boolean includeRestricted) {
     }
 
     /**

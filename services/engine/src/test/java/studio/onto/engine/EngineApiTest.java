@@ -137,6 +137,39 @@ class EngineApiTest {
     }
 
     @Test
+    void markingsFilterExports(@TempDir Path tempDir) throws Exception {
+        Path copy = tempDir.resolve("pizza.owl");
+        Files.copy(Path.of(PIZZA), copy);
+        JavalinTest.test(Main.createApp(new Workspace(), "test"), (server, client) -> {
+            body(client.post("/ontology/open", "{\"path\":\"" + copy + "\"}", HEADERS));
+            body(client.post("/marking/set",
+                    "{\"iri\":\"" + NS + "Margherita\",\"marking\":\"restricted\"}", HEADERS));
+
+            String entity = body(client.get("/entity?iri=" + encoded("Margherita"), HEADERS));
+            assertTrue(entity.contains("\"marking\":\"restricted\""), entity);
+            assertTrue(entity.contains("\"usage\":"), entity);
+            assertTrue(entity.contains("\"subClasses\":"), entity);
+
+            Path filtered = tempDir.resolve("filtered.owl");
+            String filteredBody = body(client.post("/export",
+                    "{\"path\":\"" + filtered + "\"}", HEADERS));
+            assertTrue(skippedCount(filteredBody) > 0, filteredBody);
+            assertTrue(Files.exists(filtered), "filtered export should exist");
+
+            Path full = tempDir.resolve("full.owl");
+            String fullBody = body(client.post("/export",
+                    "{\"path\":\"" + full + "\",\"includeRestricted\":true}", HEADERS));
+            assertEquals(0, skippedCount(fullBody));
+        });
+    }
+
+    private static int skippedCount(String json) {
+        java.util.regex.Matcher matcher =
+                java.util.regex.Pattern.compile("\"skipped\":(\\d+)").matcher(json);
+        return matcher.find() ? Integer.parseInt(matcher.group(1)) : -1;
+    }
+
+    @Test
     void branchesIsolateEditsAndPromote(@TempDir Path tempDir) throws Exception {
         Path copy = tempDir.resolve("pizza.owl");
         Files.copy(Path.of(PIZZA), copy);

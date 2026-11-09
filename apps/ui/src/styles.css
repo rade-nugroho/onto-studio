@@ -716,3 +716,34 @@ h2 .kind {
   overflow-wrap: anywhere;
   margin-bottom: 4px;
 }
+
+.marking {
+  margin-left: 8px;
+  padding: 2px 10px;
+  border-radius: 9999px;
+  border: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  background: var(--panel);
+  color: var(--muted);
+}
+
+.marking.internal {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--cyan);
+}
+
+.marking.restricted {
+  background: #fde8e8;
+  color: #9b1c1c;
+  border-color: #f5c2c2;
+}
+
+.usage {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 10px;
+}

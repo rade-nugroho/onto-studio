@@ -28,6 +28,12 @@ The script builds the engine jar, starts Vite, then runs the Tauri shell.
 The shell spawns `services/engine/target/engine.jar` on an ephemeral port and
 passes the port and session token to the UI through the `engine_info` command.
 
+## Markings
+
+Markings live in `.onto-studio/markings.json` next to the ontology. `Export`
+writes a copy without axioms that mention restricted entities; pass
+`includeRestricted: true` to override. The UI warns how many axioms were skipped.
+
 ## Evidence
 
 Every edit is recorded in `.onto-studio/evidence.jsonl` next to the ontology:
@@ -77,6 +83,12 @@ curl -H "X-Engine-Token: dev" "http://127.0.0.1:7717/graph?depth=2"
 | `GET /graph?depth=` | Class hierarchy slice as nodes and edges |
 | `GET /evidence?iri=` | Where an entity's axioms came from (add/remove/import rows) |
 | `GET /why?iri=&axiom=` | Asserts or infers one axiom and returns its evidence or support |
+| `GET /marking?iri=` | Classification marking for an entity |
+| `POST /marking/set` | Set `public`, `internal`, or `restricted` |
+| `POST /export` | Write a copy; restricted axioms are omitted unless `includeRestricted` |
+| `GET /branch/list` | Branches, their axiom counts, and which is active |
+| `GET /branch/diff?name=` | Asserted and inferred diff against main |
+| `POST /branch/create`, `/branch/switch`, `/branch/promote` | Proposal workflow |
 | `POST /axiom/subclass` | Add a `SubClassOf` axiom |
 | `POST /axiom/subclass/remove` | Remove a `SubClassOf` axiom |
 | `POST /ontology/save` | Save to the opened file or a new path |

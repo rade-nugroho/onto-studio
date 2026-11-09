@@ -63,6 +63,7 @@ public final class Workspace {
     private final Map<String, Branch> branches = new LinkedHashMap<>();
     private String activeBranch;
     private EvidenceStore evidence;
+    private MarkingStore markings;
     private OWLReasoner reasoner;
     private File openedFile;
     private int savedDepth;
@@ -97,6 +98,7 @@ public final class Workspace {
         branches.clear();
         activeBranch = null;
         evidence = new EvidenceStore(EvidenceStore.defaultPath(file.toPath()));
+        markings = new MarkingStore(MarkingStore.defaultPath(file.toPath()));
         evidence.record("import", "file", "", List.of(), 0.9, Map.of(
                 "file", file.getAbsolutePath(),
                 "count", ontology.getAxiomCount()));
@@ -182,7 +184,12 @@ public final class Workspace {
                     .map(range -> Map.of("iri", "", "label", renderer.render(range)))
                     .toList();
         }
+        response.put("marking", markings == null ? "public" : markings.get(iri));
+        response.put("usage", ontology.getReferencingAxioms(entity).size());
         response.put("superClasses", entity instanceof OWLClass cls ? relatedClasses(cls) : List.of());
+        response.put("subClasses", entity instanceof OWLClass cls
+                ? namedClasses(EntitySearcher.getSubClasses(cls, ontology))
+                : List.of());
         response.put("domains", domains);
         response.put("ranges", ranges);
         response.put("types", entity instanceof OWLIndividual individual
@@ -777,6 +784,74 @@ public final class Workspace {
             structural.dispose();
         }
         return result;
+    }
+
+    public synchronized void getMarking(String iri, Context ctx) {
+        if (!requireOntology(ctx)) {
+            return;
+        }
+        if (iri == null || iri.isBlank()) {
+            ctx.status(400).json(Map.of("error", "Missing iri"));
+            return;
+        }
+        ctx.json(Map.of("iri", iri, "marking", markings == null ? "public" : markings.get(iri)));
+    }
+
+    public synchronized void setMarking(Main.MarkingRequest request, Context ctx) {
+        if (!requireOntology(ctx)) {
+            return;
+        }
+        if (request.iri() == null || request.iri().isBlank()) {
+            ctx.status(400).json(Map.of("error", "Missing iri"));
+            return;
+        }
+        try {
+            markings.set(request.iri(), request.marking());
+        } catch (IllegalArgumentException error) {
+            ctx.status(400).json(Map.of("error", error.getMessage()));
+            return;
+        }
+        ctx.json(Map.of("iri", request.iri(), "marking", markings.get(request.iri())));
+    }
+
+    /**
+     * Writes a copy of the ontology without axioms that mention restricted
+     * entities, unless the caller explicitly asks to include them.
+     */
+    public synchronized void export(Main.ExportRequest request, Context ctx) {
+        if (!requireOntology(ctx)) {
+            return;
+        }
+        if (request.path() == null || request.path().isBlank()) {
+            ctx.status(400).json(Map.of("error", "Missing export path"));
+            return;
+        }
+        boolean includeRestricted = Boolean.TRUE.equals(request.includeRestricted());
+        List<OWLAxiom> kept = new ArrayList<>();
+        int skipped = 0;
+        for (OWLAxiom axiom : ontology.getAxioms()) {
+            boolean touchesRestricted = axiom.signature()
+                    .anyMatch(entity -> markings != null && markings.isRestricted(entity.getIRI().toString()));
+            if (touchesRestricted && !includeRestricted) {
+                skipped++;
+            } else {
+                kept.add(axiom);
+            }
+        }
+        OWLOntologyManager exportManager = OWLManager.createOWLOntologyManager();
+        try {
+            OWLOntology copy = exportManager.createOntology(kept);
+            exportManager.saveOntology(copy, new RDFXMLDocumentFormat(),
+                    IRI.create(new File(request.path())));
+        } catch (Exception error) {
+            ctx.status(500).json(Map.of("error", "Export failed: " + error.getMessage()));
+            return;
+        }
+        ctx.json(Map.of(
+                "path", new File(request.path()).getAbsolutePath(),
+                "axioms", kept.size(),
+                "skipped", skipped,
+                "includeRestricted", includeRestricted));
     }
 
     private record Plan(String name, List<OWLOntologyChange> changes, List<String> summary,
