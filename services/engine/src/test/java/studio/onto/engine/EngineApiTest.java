@@ -2,7 +2,6 @@ package studio.onto.engine;
 
 import io.javalin.testtools.HttpClient;
 import io.javalin.testtools.JavalinTest;
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -139,11 +138,15 @@ class EngineApiTest {
 
     @Test
     void assistantNeedsApiKey() {
-        Assumptions.assumeTrue(System.getenv("ANTHROPIC_API_KEY") == null);
-        JavalinTest.test(Main.createApp(new Workspace(), "test"), (server, client) -> {
-            open(client);
-            assertEquals(503, client.post("/assistant", "{\"question\":\"hi\"}", HEADERS).code());
-        });
+        System.setProperty("studio.onto.disableEnvFile", "true");
+        try {
+            JavalinTest.test(Main.createApp(new Workspace(), "test"), (server, client) -> {
+                open(client);
+                assertEquals(503, client.post("/assistant", "{\"question\":\"hi\"}", HEADERS).code());
+            });
+        } finally {
+            System.clearProperty("studio.onto.disableEnvFile");
+        }
     }
 
     @Test

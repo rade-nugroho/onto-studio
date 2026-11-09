@@ -33,8 +33,22 @@ public final class Assistant {
         this.workspace = workspace;
     }
 
+    /**
+     * Accepts either a base URL or the full messages endpoint, because people
+     * commonly paste https://api.anthropic.com/v1/messages into .env.local.
+     */
+    private static String normalizeBaseUrl(String url) {
+        String trimmed = url.trim();
+        for (String suffix : List.of("/v1/messages", "/v1")) {
+            if (trimmed.endsWith(suffix)) {
+                return trimmed.substring(0, trimmed.length() - suffix.length());
+            }
+        }
+        return trimmed;
+    }
+
     public void answer(String question, String entityIri, Context ctx) {
-        String apiKey = System.getenv("ANTHROPIC_API_KEY");
+        String apiKey = EnvFile.get("ANTHROPIC_API_KEY");
         if (apiKey == null || apiKey.isBlank()) {
             ctx.status(503).json(Map.of(
                     "error", "Set ANTHROPIC_API_KEY in the environment to use the assistant"));
@@ -43,9 +57,15 @@ public final class Assistant {
         String context = workspace.ontologyContext(entityIri);
         String prompt = context + "\n\nQuestion: " + question;
         try {
-            var client = AnthropicOkHttpClient.fromEnv();
+            var builder = AnthropicOkHttpClient.builder().apiKey(apiKey);
+            String baseUrl = EnvFile.get("ANTHROPIC_API_URL");
+            if (baseUrl != null && !baseUrl.isBlank()) {
+                builder.baseUrl(normalizeBaseUrl(baseUrl));
+            }
+            var client = builder.build();
+            String model = EnvFile.get("ANTHROPIC_MODEL");
             MessageCreateParams params = MessageCreateParams.builder()
-                    .model(Model.CLAUDE_SONNET_4_5)
+                    .model(model == null || model.isBlank() ? Model.CLAUDE_SONNET_4_5 : Model.of(model))
                     .maxTokens(1024)
                     .system(SYSTEM_PROMPT)
                     .addUserMessage(prompt)

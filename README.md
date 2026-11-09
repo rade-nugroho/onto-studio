@@ -28,6 +28,17 @@ The script builds the engine jar, starts Vite, then runs the Tauri shell.
 The shell spawns `services/engine/target/engine.jar` on an ephemeral port and
 passes the port and session token to the UI through the `engine_info` command.
 
+## Assistant configuration
+
+The assistant reads `.env.local` (working directory or next to the engine jar),
+falling back to the process environment:
+
+```
+ANTHROPIC_API_KEY=...
+ANTHROPIC_MODEL=claude-haiku-5-5        # optional
+ANTHROPIC_API_URL=https://api.anthropic.com   # optional, full /v1/messages URL also accepted
+```
+
 ## Run the engine alone
 
 ```bash
