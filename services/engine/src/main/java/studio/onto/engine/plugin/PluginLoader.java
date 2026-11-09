@@ -1,7 +1,5 @@
 package studio.onto.engine.plugin;
 
-import java.net.URL;
-import java.net.URLClassLoader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -37,9 +35,12 @@ public final class PluginLoader {
         try (Stream<Path> jars = Files.list(dir)) {
             for (Path jar : jars.filter(path -> path.toString().endsWith(".jar")).toList()) {
                 try {
-                    URLClassLoader loader = new URLClassLoader(
-                            new URL[]{jar.toUri().toURL()}, Plugin.class.getClassLoader());
-                    addAll(ServiceLoader.load(Plugin.class, loader), plugins);
+                    RemotePlugin remote = new RemotePlugin(jar);
+                    if (GRANTED.containsAll(remote.permissions())) {
+                        plugins.add(remote);
+                    } else {
+                        remote.close();
+                    }
                 } catch (Exception ignored) {
                     // A broken plugin must not stop the engine from starting.
                 }

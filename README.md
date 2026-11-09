@@ -53,6 +53,21 @@ curl -X POST http://127.0.0.1:PORT/plugins/install \
 The jar must be under 5 MB and match the digest; the plugin list reloads
 immediately. In the app, run **Install plugin…** from the command palette.
 
+### Isolation
+
+Plugins loaded from `~/.onto-studio/plugins/*.jar` run in their own JVM
+(`PluginHost`, stdio JSON). A plugin that hangs is killed after 10 seconds, and
+it cannot corrupt the workbench heap. Plugins on the engine classpath (used by
+tests) still run in-process.
+
+### Internal catalog
+
+`~/.onto-studio/plugins/catalog.json` pins entries as `name -> {url, sha256,
+signature}`. The signature is an HMAC-SHA256 over `name|url|sha256` with
+`ONTO_STUDIO_CATALOG_KEY`; install refuses an entry whose signature does not
+match. Endpoints: `GET /plugins/catalog`, `POST /plugins/catalog/add`,
+`POST /plugins/catalog/install`.
+
 ## Actions
 
 Declared actions, previewed before they apply:
