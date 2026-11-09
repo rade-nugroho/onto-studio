@@ -12,6 +12,7 @@ import org.semanticweb.owlapi.model.AddAxiom;
 import org.semanticweb.owlapi.model.AxiomType;
 import org.semanticweb.owlapi.model.IRI;
 import org.semanticweb.owlapi.model.OWLAnnotation;
+import org.semanticweb.owlapi.model.OWLAnnotationAssertionAxiom;
 import org.semanticweb.owlapi.model.OWLAnnotationProperty;
 import org.semanticweb.owlapi.model.OWLAxiom;
 import org.semanticweb.owlapi.model.OWLClass;
@@ -175,7 +176,7 @@ public final class Workspace implements Plugin.PluginContext {
         }
         apply(axioms.stream().map(axiom -> (OWLOntologyChange) new AddAxiom(ontology, axiom)).toList());
         Map<String, Object> response = new LinkedHashMap<>(state());
-        response.put("added", axioms.stream().map(renderer::render).toList());
+        response.put("added", axioms.stream().map(this::renderAxiom).toList());
         ctx.json(response);
     }
 
@@ -428,7 +429,7 @@ public final class Workspace implements Plugin.PluginContext {
         }
         apply(axioms.stream().map(axiom -> (OWLOntologyChange) new AddAxiom(ontology, axiom)).toList());
         Map<String, Object> response = new LinkedHashMap<>(state());
-        response.put("added", axioms.stream().map(renderer::render).toList());
+        response.put("added", axioms.stream().map(this::renderAxiom).toList());
         ctx.json(response);
     }
 
@@ -574,6 +575,15 @@ public final class Workspace implements Plugin.PluginContext {
     private List<OWLAxiom> parseFrames(String text, boolean allowNew) {
         ManchesterOWLSyntaxEditorParser parser = new ManchesterOWLSyntaxEditorParser(dataFactory, text);
         parser.setDefaultOntology(ontology);
+        var prefixes = parser.getPrefixManager();
+        ontology.getOntologyID().getOntologyIRI().ifPresent(iri ->
+                prefixes.setDefaultPrefix(iri.toString().endsWith("#") ? iri.toString() : iri + "#"));
+        prefixes.setPrefix("rdf:", "http://www.w3.org/1999/02/22-rdf-syntax-ns#");
+        prefixes.setPrefix("rdfs:", "http://www.w3.org/2000/01/rdf-schema#");
+        prefixes.setPrefix("owl:", "http://www.w3.org/2002/07/owl#");
+        prefixes.setPrefix("xsd:", "http://www.w3.org/2001/XMLSchema#");
+        prefixes.setPrefix("skos:", "http://www.w3.org/2004/02/skos/core#");
+        prefixes.setPrefix("dc:", "http://purl.org/dc/elements/1.1/");
         BidirectionalShortFormProviderAdapter shortForms =
                 new BidirectionalShortFormProviderAdapter(manager, Set.of(ontology), new SimpleShortFormProvider());
         parser.setOWLEntityChecker(allowNew
@@ -582,8 +592,39 @@ public final class Workspace implements Plugin.PluginContext {
         return parser.parseFrames().stream()
                 .filter(pair -> pair.getOntology() == null || pair.getOntology().equals(ontology))
                 .map(OntologyAxiomPair::getAxiom)
+                .map(this::literalizeQuotedAnnotation)
                 .distinct()
                 .toList();
+    }
+
+    /**
+     * The Manchester frame parser turns a quoted annotation value into an IRI
+     * relative to the default prefix. Convert those back into literals so
+     * {@code Annotations: rdfs:comment "text"} behaves as written.
+     */
+    private OWLAxiom literalizeQuotedAnnotation(OWLAxiom axiom) {
+        if (!(axiom instanceof OWLAnnotationAssertionAxiom assertion)) {
+            return axiom;
+        }
+        var value = assertion.getValue();
+        if (!value.isIRI()) {
+            return axiom;
+        }
+        String iri = value.asIRI().get().toString();
+        int start = iri.indexOf('"');
+        int end = iri.lastIndexOf('"');
+        if (start < 0 || end <= start) {
+            return axiom;
+        }
+        String text = iri.substring(start + 1, end);
+        return dataFactory.getOWLAnnotationAssertionAxiom(
+                assertion.getProperty(), assertion.getSubject(), dataFactory.getOWLLiteral(text));
+    }
+
+    /** DL rendering leaves annotation axioms blank; fall back to functional syntax. */
+    private String renderAxiom(OWLAxiom axiom) {
+        String rendered = renderer.render(axiom);
+        return rendered == null || rendered.isBlank() ? axiom.toString() : rendered;
     }
 
     private void apply(List<OWLOntologyChange> changes) {
@@ -1475,7 +1516,24 @@ public final class Workspace implements Plugin.PluginContext {
         @Override
         public OWLAnnotationProperty getOWLAnnotationProperty(String name) {
             OWLAnnotationProperty found = delegate.getOWLAnnotationProperty(name);
-            return found != null ? found : dataFactory.getOWLAnnotationProperty(iri(name));
+            if (found != null) {
+                return found;
+            }
+            OWLAnnotationProperty builtIn = builtInAnnotationProperty(name);
+            return builtIn != null ? builtIn : dataFactory.getOWLAnnotationProperty(iri(name));
+        }
+
+        /** Standard annotation properties must never become local entities. */
+        private OWLAnnotationProperty builtInAnnotationProperty(String name) {
+            return switch (name) {
+                case "rdfs:label", "label" -> dataFactory.getRDFSLabel();
+                case "rdfs:comment", "comment" -> dataFactory.getRDFSComment();
+                case "rdfs:seeAlso", "seeAlso" -> dataFactory.getRDFSSeeAlso();
+                case "rdfs:isDefinedBy", "isDefinedBy" -> dataFactory.getRDFSIsDefinedBy();
+                case "owl:deprecated", "deprecated" -> dataFactory.getOWLDeprecated();
+                case "owl:versionInfo", "versionInfo" -> dataFactory.getOWLVersionInfo();
+                default -> null;
+            };
         }
 
         @Override

@@ -137,6 +137,38 @@ class EngineApiTest {
     }
 
     @Test
+    void createsOntologyAndAppliesBatchWithAnnotations(@TempDir Path tempDir) throws Exception {
+        Path file = tempDir.resolve("new.owl");
+        JavalinTest.test(Main.createApp(new Workspace(), "test"), (server, client) -> {
+            String created = body(client.post("/ontology/new",
+                    "{\"path\":\"" + file + "\"}", HEADERS));
+            assertTrue(created.contains("\"axiomCount\":0"), created);
+
+            String batch = body(client.post("/axiom/batch",
+                    "{\"text\":\"Class: Customer\\n  Annotations: rdfs:comment \\\"A person who orders\\\""
+                            + "\\n  SubClassOf: Thing\\nClass: Order\\n  SubClassOf: Thing\"}", HEADERS));
+            assertTrue(batch.contains("added"), batch);
+
+            String customerIri = URLEncoder.encode("file:" + file + "#Customer", StandardCharsets.UTF_8);
+            String entity = body(client.get("/entity?iri=" + customerIri, HEADERS));
+            assertTrue(entity.contains("comment: A person who orders"), entity);
+            assertTrue(entity.contains("\"label\":\"Customer\""), entity);
+        });
+    }
+
+    @Test
+    void extractsPlainTextDocuments(@TempDir Path tempDir) throws Exception {
+        Path doc = tempDir.resolve("prd.md");
+        Files.writeString(doc, "# PRD\nCoffee shop ordering system");
+        JavalinTest.test(Main.createApp(new Workspace(), "test"), (server, client) -> {
+            String extracted = body(client.post("/document/extract",
+                    "{\"path\":\"" + doc + "\"}", HEADERS));
+            assertTrue(extracted.contains("Coffee shop ordering system"), extracted);
+            assertTrue(extracted.contains("\"chars\":"), extracted);
+        });
+    }
+
+    @Test
     void catalogEntriesAreSignedAndInstalled(@TempDir Path home) throws Exception {
         Files.createDirectories(home.resolve(".onto-studio"));
         Files.writeString(home.resolve(".onto-studio.env"), "ONTO_STUDIO_CATALOG_KEY=test-key\n");
