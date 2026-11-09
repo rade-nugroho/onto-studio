@@ -81,6 +81,11 @@ public final class Main {
         app.post("/action/preview", ctx -> workspace.previewAction(ctx.bodyAsClass(ActionRequest.class), ctx));
         app.post("/action/commit", ctx -> workspace.commitAction(ctx.bodyAsClass(ActionRequest.class), ctx));
         app.get("/audit", workspace::audit);
+        app.post("/branch/create", ctx -> workspace.createBranch(ctx.bodyAsClass(BranchRequest.class), ctx));
+        app.post("/branch/switch", ctx -> workspace.switchBranch(ctx.bodyAsClass(BranchRequest.class), ctx));
+        app.get("/branch/list", workspace::listBranches);
+        app.get("/branch/diff", ctx -> workspace.branchDiff(ctx.queryParam("name"), ctx));
+        app.post("/branch/promote", ctx -> workspace.promoteBranch(ctx.bodyAsClass(BranchRequest.class), ctx));
         app.get("/why", ctx -> workspace.why(
                 ctx.queryParam("iri"), ctx.queryParam("axiom"), ctx));
         app.post("/assistant", ctx -> {
@@ -117,6 +122,9 @@ public final class Main {
     }
 
     public record ActionRequest(String action, Map<String, String> params, String reason) {
+    }
+
+    public record BranchRequest(String name, String reason) {
     }
 
     /**

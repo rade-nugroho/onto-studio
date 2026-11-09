@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, type EditState, type EntityInfo, type OntologyInfo, type SearchResult, type TreeNode } from "./api";
+import {
+  api,
+  type BranchDiff,
+  type BranchInfo,
+  type EditState,
+  type EntityInfo,
+  type OntologyInfo,
+  type SearchResult,
+  type TreeNode,
+} from "./api";
 import EntityPanel from "./EntityPanel";
 import GraphView from "./GraphView";
 import AppShell9 from "@/components/blocks/app-shell-9";
@@ -34,6 +43,9 @@ export default function App() {
   const [canRedo, setCanRedo] = useState(false);
   const [reasoning, setReasoning] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [branches, setBranches] = useState<BranchInfo[]>([]);
+  const [activeBranch, setActiveBranch] = useState("main");
+  const [diff, setDiff] = useState<BranchDiff | null>(null);
   const [version, setVersion] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
@@ -72,12 +84,76 @@ export default function App() {
         setDirty(false);
         setCanUndo(false);
         setCanRedo(false);
+        setDiff(null);
+        setActiveBranch("main");
+        setBranches((await api.branches()).branches);
         await loadChildren();
       }
     } catch (e) {
       setError((e as Error).message);
     }
   }, [loadChildren]);
+
+  const refreshBranches = useCallback(async () => {
+    setBranches((await api.branches()).branches);
+  }, []);
+
+  const switchBranch = useCallback(
+    async (name: string) => {
+      try {
+        await api.switchBranch(name);
+        setActiveBranch(name);
+        setDiff(null);
+        setChildren({});
+        setExpanded(new Set());
+        setVersion((v) => v + 1);
+        await refreshBranches();
+        await loadChildren();
+      } catch (e) {
+        setError((e as Error).message);
+      }
+    },
+    [loadChildren, refreshBranches],
+  );
+
+  const newBranch = useCallback(async () => {
+    const name = window.prompt("Branch name");
+    if (!name) {
+      return;
+    }
+    try {
+      await api.createBranch(name);
+      await refreshBranches();
+      await switchBranch(name);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }, [refreshBranches, switchBranch]);
+
+  const showDiff = useCallback(async () => {
+    try {
+      setDiff(await api.branchDiff(activeBranch));
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }, [activeBranch]);
+
+  const promote = useCallback(async () => {
+    const reason = window.prompt("Reason for promoting this branch");
+    if (reason === null) {
+      return;
+    }
+    try {
+      await api.promoteBranch(activeBranch, reason);
+      setActiveBranch("main");
+      setDiff(null);
+      setVersion((v) => v + 1);
+      await refreshBranches();
+      await loadChildren();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }, [activeBranch, loadChildren, refreshBranches]);
 
   const toggle = useCallback(
     async (node: TreeNode) => {
@@ -387,6 +463,51 @@ export default function App() {
         <CommandMenu1 commands={commands} onRun={runCommand} defaultOpen={false} compact />
       </header>
 
+      {ontology && (
+        <div className="branch-bar">
+          <span className="muted">Branch</span>
+          <select
+            className="depth"
+            value={activeBranch}
+            onChange={(event) => switchBranch(event.target.value)}
+          >
+            {branches.map((branch) => (
+              <option key={branch.name} value={branch.name}>
+                {branch.name} ({branch.axioms})
+              </option>
+            ))}
+          </select>
+          <button onClick={newBranch}>New branch</button>
+          {activeBranch !== "main" && (
+            <>
+              <button onClick={showDiff}>Diff</button>
+              <button onClick={promote}>Promote</button>
+            </>
+          )}
+          {activeBranch !== "main" && (
+            <span className="muted">editing a proposal; main is untouched</span>
+          )}
+        </div>
+      )}
+
+      {diff && (
+        <div className="branch-diff">
+          <div className="preview-head">
+            {diff.branch} vs main · +{diff.added.length} / -{diff.removed.length} asserted ·{" "}
+            +{diff.inferredAdded.length} / -{diff.inferredRemoved.length} inferred
+            <button className="remove" onClick={() => setDiff(null)}>
+              ×
+            </button>
+          </div>
+          <div className="diff-columns">
+            <DiffList title="Added" items={diff.added} />
+            <DiffList title="Removed" items={diff.removed} />
+            <DiffList title="Inferred added" items={diff.inferredAdded} />
+            <DiffList title="Inferred removed" items={diff.inferredRemoved} />
+          </div>
+        </div>
+      )}
+
       {results.length > 0 && (
         <div className="results">
           {results.map((result) => (
@@ -471,6 +592,21 @@ export default function App() {
       {error && <div className="error">{error}</div>}
     </div>
     </AppShell9>
+  );
+}
+
+function DiffList({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div className="diff-col">
+      <h4>{title}</h4>
+      {items.length === 0 && <div className="muted">none</div>}
+      {items.slice(0, 40).map((item) => (
+        <div key={item} className="axiom">
+          {item}
+        </div>
+      ))}
+      {items.length > 40 && <div className="muted">+{items.length - 40} more</div>}
+    </div>
   );
 }
 

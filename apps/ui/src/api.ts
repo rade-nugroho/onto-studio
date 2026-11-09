@@ -60,6 +60,21 @@ export type AuditRow = EvidenceRow & {
   changes?: string[];
 };
 
+export type BranchInfo = {
+  name: string;
+  axioms: number;
+  createdAt?: string;
+  active: boolean;
+};
+
+export type BranchDiff = {
+  branch: string;
+  added: string[];
+  removed: string[];
+  inferredAdded: string[];
+  inferredRemoved: string[];
+};
+
 export type EditState = {
   dirty: boolean;
   canUndo: boolean;
@@ -190,6 +205,24 @@ export const api = {
       body: JSON.stringify({ action, params, reason }),
     }),
   audit: () => call<{ rows: AuditRow[] }>("/audit"),
+  branches: () => call<{ branches: BranchInfo[] }>("/branch/list"),
+  createBranch: (name: string) =>
+    call<{ name: string; axioms: number }>("/branch/create", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }),
+  switchBranch: (name: string) =>
+    call<{ branch: string; axioms: number }>("/branch/switch", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }),
+  branchDiff: (name: string) =>
+    call<BranchDiff>(`/branch/diff?name=${encodeURIComponent(name)}`),
+  promoteBranch: (name: string, reason: string) =>
+    call<{ promoted: string; changes: number }>("/branch/promote", {
+      method: "POST",
+      body: JSON.stringify({ name, reason }),
+    }),
   evidence: (iri: string) =>
     call<{ rows: EvidenceRow[]; import: EvidenceRow | null }>(
       `/evidence?iri=${encodeURIComponent(iri)}`,

@@ -677,3 +677,42 @@ h2 .kind {
   letter-spacing: 0.4px;
   color: var(--muted);
 }
+
+.branch-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  font-size: 12px;
+}
+
+.branch-diff {
+  border-bottom: 1px solid var(--border);
+  background: var(--accent-soft);
+  padding: 10px 12px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.diff-columns {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.diff-col h4 {
+  margin: 0 0 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--muted);
+}
+
+.diff-col .axiom {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  margin-bottom: 4px;
+}

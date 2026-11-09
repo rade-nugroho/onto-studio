@@ -57,6 +57,11 @@ public final class Workspace {
     private final Deque<List<OWLOntologyChange>> redoStack = new ArrayDeque<>();
 
     private OWLOntology ontology;
+    private OWLOntology mainOntology;
+    private OWLOntologyManager mainManager;
+    private OWLOntologyManager activeManager;
+    private final Map<String, Branch> branches = new LinkedHashMap<>();
+    private String activeBranch;
     private EvidenceStore evidence;
     private OWLReasoner reasoner;
     private File openedFile;
@@ -64,6 +69,10 @@ public final class Workspace {
 
     public Workspace() {
         renderer.setShortFormProvider(new SimpleShortFormProvider());
+        activeManager = manager;
+    }
+
+    private record Branch(String name, OWLOntology ontology, OWLOntologyManager manager, String createdAt) {
     }
 
     public synchronized void open(Main.OpenRequest request, Context ctx) {
@@ -82,6 +91,11 @@ public final class Workspace {
         }
         stopReasonerInternal();
         openedFile = file;
+        mainOntology = ontology;
+        mainManager = manager;
+        activeManager = manager;
+        branches.clear();
+        activeBranch = null;
         evidence = new EvidenceStore(EvidenceStore.defaultPath(file.toPath()));
         evidence.record("import", "file", "", List.of(), 0.9, Map.of(
                 "file", file.getAbsolutePath(),
@@ -412,7 +426,7 @@ public final class Workspace {
         }
         List<OWLOntologyChange> changes = undoStack.pop();
         List<OWLOntologyChange> inverseChanges = inverse(changes);
-        manager.applyChanges(inverseChanges);
+        activeManager.applyChanges(inverseChanges);
         recordEvidence(inverseChanges, "undo");
         redoStack.push(changes);
         ctx.json(state());
@@ -427,7 +441,7 @@ public final class Workspace {
             return;
         }
         List<OWLOntologyChange> changes = redoStack.pop();
-        manager.applyChanges(changes);
+        activeManager.applyChanges(changes);
         recordEvidence(changes, "redo");
         undoStack.push(changes);
         ctx.json(state());
@@ -439,6 +453,10 @@ public final class Workspace {
 
     public synchronized void save(Main.SaveRequest request, Context ctx) throws Exception {
         if (!requireOntology(ctx)) {
+            return;
+        }
+        if (activeBranch != null) {
+            ctx.status(409).json(Map.of("error", "Switch to main before saving; promote the branch instead"));
             return;
         }
         File target = request.path() == null || request.path().isBlank()
@@ -504,7 +522,7 @@ public final class Workspace {
     }
 
     private void apply(List<OWLOntologyChange> changes, String source) {
-        manager.applyChanges(changes);
+        activeManager.applyChanges(changes);
         recordEvidence(changes, source);
         if (reasoner != null) {
             reasoner.flush();
@@ -576,6 +594,189 @@ public final class Workspace {
 
     public synchronized void audit(Context ctx) {
         ctx.json(Map.of("rows", evidence == null ? List.of() : evidence.recentActions(50)));
+    }
+
+    public synchronized void createBranch(Main.BranchRequest request, Context ctx) {
+        if (!requireOntology(ctx)) {
+            return;
+        }
+        String name = request.name() == null ? "" : request.name().trim();
+        if (name.isEmpty()) {
+            ctx.status(400).json(Map.of("error", "Missing branch name"));
+            return;
+        }
+        if (branches.containsKey(name)) {
+            ctx.status(409).json(Map.of("error", "Branch already exists: " + name));
+            return;
+        }
+        OWLOntologyManager branchManager = OWLManager.createOWLOntologyManager();
+        OWLOntology copy;
+        try {
+            copy = branchManager.createOntology(ontology.getAxioms(), IRI.create(branchIri(name)));
+        } catch (Exception error) {
+            ctx.status(500).json(Map.of("error", "Could not create branch: " + error.getMessage()));
+            return;
+        }
+        branches.put(name, new Branch(name, copy, branchManager, java.time.Instant.now().toString()));
+        ctx.json(Map.of("name", name, "axioms", copy.getAxiomCount()));
+    }
+
+    public synchronized void switchBranch(Main.BranchRequest request, Context ctx) {
+        if (!requireOntology(ctx)) {
+            return;
+        }
+        String name = request.name() == null ? "" : request.name().trim();
+        if (name.isEmpty() || "main".equals(name)) {
+            ontology = mainOntology;
+            activeManager = mainManager;
+            activeBranch = null;
+        } else {
+            Branch branch = branches.get(name);
+            if (branch == null) {
+                ctx.status(404).json(Map.of("error", "Unknown branch: " + name));
+                return;
+            }
+            ontology = branch.ontology();
+            activeManager = branch.manager();
+            activeBranch = name;
+        }
+        undoStack.clear();
+        redoStack.clear();
+        ctx.json(Map.of(
+                "branch", activeBranch == null ? "main" : activeBranch,
+                "axioms", ontology.getAxiomCount()));
+    }
+
+    public synchronized void listBranches(Context ctx) {
+        if (!requireOntology(ctx)) {
+            return;
+        }
+        List<Map<String, Object>> list = new ArrayList<>();
+        list.add(Map.of("name", "main", "axioms", mainOntology.getAxiomCount(),
+                "active", activeBranch == null));
+        for (Branch branch : branches.values()) {
+            list.add(Map.of(
+                    "name", branch.name(),
+                    "axioms", branch.ontology().getAxiomCount(),
+                    "createdAt", branch.createdAt(),
+                    "active", branch.name().equals(activeBranch)));
+        }
+        ctx.json(Map.of("branches", list));
+    }
+
+    /**
+     * Semantic diff between a branch and main: asserted axioms that would be
+     * added or removed, plus inferred subsumptions that appear or disappear.
+     */
+    public synchronized void branchDiff(String name, Context ctx) {
+        if (!requireOntology(ctx)) {
+            return;
+        }
+        Branch branch = branches.get(name);
+        if (branch == null) {
+            ctx.status(404).json(Map.of("error", "Unknown branch: " + name));
+            return;
+        }
+        Map<String, String> mainAxioms = renderedAxioms(mainOntology);
+        Map<String, String> branchAxioms = renderedAxioms(branch.ontology());
+
+        List<String> added = branchAxioms.keySet().stream()
+                .filter(key -> !mainAxioms.containsKey(key)).sorted().toList();
+        List<String> removed = mainAxioms.keySet().stream()
+                .filter(key -> !branchAxioms.containsKey(key)).sorted().toList();
+
+        Set<String> mainInferred = inferredSubsumptions(mainOntology);
+        Set<String> branchInferred = inferredSubsumptions(branch.ontology());
+        List<String> inferredAdded = branchInferred.stream()
+                .filter(item -> !mainInferred.contains(item)).sorted().toList();
+        List<String> inferredRemoved = mainInferred.stream()
+                .filter(item -> !branchInferred.contains(item)).sorted().toList();
+
+        ctx.json(Map.of(
+                "branch", name,
+                "added", added,
+                "removed", removed,
+                "inferredAdded", inferredAdded,
+                "inferredRemoved", inferredRemoved));
+    }
+
+    public synchronized void promoteBranch(Main.BranchRequest request, Context ctx) {
+        if (!requireOntology(ctx)) {
+            return;
+        }
+        String name = request.name() == null ? "" : request.name().trim();
+        Branch branch = branches.get(name);
+        if (branch == null) {
+            ctx.status(404).json(Map.of("error", "Unknown branch: " + name));
+            return;
+        }
+        Map<String, OWLAxiom> mainAxioms = mainOntology.getAxioms().stream()
+                .collect(java.util.stream.Collectors.toMap(Workspace::axiomKey, axiom -> axiom, (a, b) -> a));
+        Map<String, OWLAxiom> branchAxioms = branch.ontology().getAxioms().stream()
+                .collect(java.util.stream.Collectors.toMap(Workspace::axiomKey, axiom -> axiom, (a, b) -> a));
+
+        List<OWLOntologyChange> changes = new ArrayList<>();
+        branchAxioms.forEach((key, axiom) -> {
+            if (!mainAxioms.containsKey(key)) {
+                changes.add(new AddAxiom(mainOntology, axiom));
+            }
+        });
+        mainAxioms.forEach((key, axiom) -> {
+            if (!branchAxioms.containsKey(key)) {
+                changes.add(new RemoveAxiom(mainOntology, axiom));
+            }
+        });
+        if (changes.isEmpty()) {
+            ctx.json(Map.of("promoted", name, "changes", 0));
+            return;
+        }
+        mainManager.applyChanges(changes);
+        recordEvidence(changes, "promote:" + name);
+        if (evidence != null) {
+            evidence.record("action", "promote:" + name, "", List.of(), 1.0, Map.of(
+                    "actionName", "promote",
+                    "reason", request.reason() == null ? "" : request.reason(),
+                    "changes", changes.stream().map(Workspace::describe).toList(),
+                    "branch", name));
+        }
+        branches.remove(name);
+        ontology = mainOntology;
+        activeManager = mainManager;
+        activeBranch = null;
+        undoStack.clear();
+        redoStack.clear();
+        ctx.json(Map.of("promoted", name, "changes", changes.size()));
+    }
+
+    private String branchIri(String name) {
+        String base = ontology.getOntologyID().getOntologyIRI().map(IRI::toString).orElse("urn:onto-studio");
+        return base + "#branch-" + name.replaceAll("[^A-Za-z0-9_-]", "-");
+    }
+
+    private static Map<String, String> renderedAxioms(OWLOntology source) {
+        Map<String, String> result = new LinkedHashMap<>();
+        source.getAxioms().forEach(axiom -> result.put(axiomKey(axiom), axiom.toString()));
+        return result;
+    }
+
+    private static String axiomKey(OWLAxiom axiom) {
+        return axiom.toString();
+    }
+
+    /** Inferred named subsumptions, capped so diffing stays responsive. */
+    private Set<String> inferredSubsumptions(OWLOntology source) {
+        Set<String> result = new java.util.HashSet<>();
+        OWLReasoner structural = new StructuralReasonerFactory().createReasoner(source);
+        try {
+            structural.precomputeInferences(InferenceType.CLASS_HIERARCHY);
+            source.classesInSignature().limit(150).forEach(cls ->
+                    structural.getSubClasses(cls, true).entities()
+                            .filter(sub -> !sub.isOWLNothing() && !sub.equals(cls))
+                            .forEach(sub -> result.add(label(sub) + " ⊑ " + label(cls))));
+        } finally {
+            structural.dispose();
+        }
+        return result;
     }
 
     private record Plan(String name, List<OWLOntologyChange> changes, List<String> summary,

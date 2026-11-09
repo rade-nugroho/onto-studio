@@ -137,6 +137,38 @@ class EngineApiTest {
     }
 
     @Test
+    void branchesIsolateEditsAndPromote(@TempDir Path tempDir) throws Exception {
+        Path copy = tempDir.resolve("pizza.owl");
+        Files.copy(Path.of(PIZZA), copy);
+        JavalinTest.test(Main.createApp(new Workspace(), "test"), (server, client) -> {
+            body(client.post("/ontology/open", "{\"path\":\"" + copy + "\"}", HEADERS));
+            body(client.post("/branch/create", "{\"name\":\"proposal\"}", HEADERS));
+            String switched = body(client.post("/branch/switch", "{\"name\":\"proposal\"}", HEADERS));
+            assertTrue(switched.contains("\"branch\":\"proposal\""), switched);
+
+            body(client.post("/axiom/subclass",
+                    "{\"sub\":\"" + NS + "Margherita\",\"sup\":\"" + NS + "Pizza\"}", HEADERS));
+
+            String diff = body(client.get("/branch/diff?name=proposal", HEADERS));
+            assertTrue(diff.contains("\"added\""), diff);
+            assertTrue(diff.contains("SubClassOf"), diff);
+            assertTrue(diff.contains("Margherita ⊑ Pizza"), diff);
+
+            body(client.post("/branch/switch", "{\"name\":\"main\"}", HEADERS));
+            String mainList = body(client.get("/branch/list", HEADERS));
+            assertTrue(mainList.contains("\"axioms\":930"), mainList);
+
+            String promoted = body(client.post("/branch/promote",
+                    "{\"name\":\"proposal\",\"reason\":\"reviewed\"}", HEADERS));
+            assertTrue(promoted.contains("\"changes\":1"), promoted);
+
+            String after = body(client.get("/branch/list", HEADERS));
+            assertTrue(after.contains("\"axioms\":931"), after);
+            assertFalse(after.contains("proposal"), after);
+        });
+    }
+
+    @Test
     void actionsPreviewThenCommitWithAudit(@TempDir Path tempDir) throws Exception {
         Path copy = tempDir.resolve("pizza.owl");
         Files.copy(Path.of(PIZZA), copy);
