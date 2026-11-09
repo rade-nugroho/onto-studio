@@ -178,6 +178,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ sub, sup }),
     }),
+  validateAxiom: (text: string) =>
+    call<{ ok: boolean; axioms: string[]; unknown?: string[]; error?: string }>(
+      "/axiom/validate",
+      { method: "POST", body: JSON.stringify({ text }) },
+    ),
   addAxiomText: (text: string) =>
     call<EditState & { added: string[] }>("/axiom/add-text", {
       method: "POST",

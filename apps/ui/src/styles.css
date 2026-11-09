@@ -747,3 +747,20 @@ h2 .kind {
   color: var(--muted);
   margin-bottom: 10px;
 }
+
+.validation {
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.validation.ok {
+  background: #eaf5ee;
+  color: #1c6b3a;
+}
+
+.validation.bad {
+  background: #fde8e8;
+  color: #9b1c1c;
+}

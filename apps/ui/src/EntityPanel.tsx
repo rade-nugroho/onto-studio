@@ -27,6 +27,12 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
   const [preview, setPreview] = useState<ActionPreview | null>(null);
   const [pending, setPending] = useState<{ action: string; params: Record<string, string> } | null>(null);
   const [datatype, setDatatype] = useState("xsd:string");
+  const [validation, setValidation] = useState<{
+    ok: boolean;
+    axioms: string[];
+    unknown?: string[];
+    error?: string;
+  } | null>(null);
   const [audit, setAudit] = useState<AuditRow[]>([]);
 
   const run = useCallback(
@@ -122,6 +128,34 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
       onError((error as Error).message);
     }
   }, [entity.iri, onEdited, onError, pending]);
+
+  useEffect(() => {
+    const text = axiomText.trim();
+    if (!text) {
+      setValidation(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      api
+        .validateAxiom(text)
+        .then(setValidation)
+        .catch((error: Error) => setValidation({ ok: false, axioms: [], error: error.message }));
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [axiomText]);
+
+  const placeholderFor = (kind: string) => {
+    switch (kind) {
+      case "object property":
+        return "ObjectProperty: hasTopping\n  Domain: Pizza";
+      case "data property":
+        return "DataProperty: hasCalories\n  Range: xsd:integer";
+      case "individual":
+        return "Individual: America\n  Types: Country";
+      default:
+        return "Class: Pizza\n  SubClassOf: Food";
+    }
+  };
 
   const addAxiom = useCallback(async () => {
     const text = axiomText.trim();
@@ -378,12 +412,23 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
         <textarea
           className="axiom-input"
           rows={3}
-          placeholder={"Manchester syntax, e.g.\nClass: Pizza\n  SubClassOf: Food"}
+          placeholder={placeholderFor(entity.kind)}
           value={axiomText}
           onChange={(event) => setAxiomText(event.target.value)}
         />
+        {validation && (
+          <div className={`validation ${validation.ok && !validation.error ? "ok" : "bad"}`}>
+            {validation.error
+              ? validation.error
+              : validation.unknown && validation.unknown.length > 0
+                ? `Parsed ${validation.axioms.length} axiom(s); unknown: ${validation.unknown
+                    .map((iri) => iri.split("#").pop())
+                    .join(", ")}`
+                : `Parsed ${validation.axioms.length} axiom(s) — ready to add`}
+          </div>
+        )}
         <div className="row-actions">
-          <button onClick={addAxiom} disabled={busy || axiomText.trim().length === 0}>
+          <button onClick={addAxiom} disabled={busy || !validation?.ok || !!validation.error}>
             Add axiom
           </button>
         </div>

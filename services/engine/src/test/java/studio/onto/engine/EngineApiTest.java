@@ -137,6 +137,47 @@ class EngineApiTest {
     }
 
     @Test
+    void pluginActionsAreDiscoveredAndApplied(@TempDir Path tempDir) throws Exception {
+        Path copy = tempDir.resolve("pizza.owl");
+        Files.copy(Path.of(PIZZA), copy);
+        JavalinTest.test(Main.createApp(new Workspace(), "test"), (server, client) -> {
+            body(client.post("/ontology/open", "{\"path\":\"" + copy + "\"}", HEADERS));
+            String plugins = body(client.get("/plugins", HEADERS));
+            assertTrue(plugins.contains("example:deprecate"), plugins);
+
+            okhttp3.Response commitResponse = client.post("/action/commit",
+                    "{\"action\":\"example:deprecate\",\"params\":{\"iri\":\"" + NS
+                            + "Margherita\"}}", HEADERS);
+            String commit = body(commitResponse);
+            assertEquals(200, commitResponse.code(), commit);
+            assertTrue(commit.contains("add:"), commit);
+            String branches = body(client.get("/branch/list", HEADERS));
+            assertTrue(branches.contains("\"axioms\":931"), branches);
+
+            String entity = body(client.get("/entity?iri=" + encoded("Margherita"), HEADERS));
+            assertTrue(entity.toLowerCase().contains("deprecated"), entity);
+        });
+    }
+
+    @Test
+    void validatesAxiomTextWithoutApplyingIt() {
+        JavalinTest.test(Main.createApp(new Workspace(), "test"), (server, client) -> {
+            open(client);
+            String good = body(client.post("/axiom/validate",
+                    "{\"text\":\"Class: Margherita\\n  SubClassOf: Pizza\"}", HEADERS));
+            assertTrue(good.contains("\"ok\":true"), good);
+
+            String bad = body(client.post("/axiom/validate",
+                    "{\"text\":\"Class: Margherita\\n  SubClassOf: DoesNotExist\"}", HEADERS));
+            assertTrue(bad.contains("\"ok\":false"), bad);
+            assertTrue(bad.contains("DoesNotExist"), bad);
+
+            String stillOpen = body(client.get("/entity?iri=" + encoded("Margherita"), HEADERS));
+            assertFalse(stillOpen.contains("Margherita ⊑ Pizza"), stillOpen);
+        });
+    }
+
+    @Test
     void propertyAndIndividualActions(@TempDir Path tempDir) throws Exception {
         Path copy = tempDir.resolve("pizza.owl");
         Files.copy(Path.of(PIZZA), copy);

@@ -59,7 +59,8 @@ public final class Assistant {
             3. Derive classes, object properties, data properties, and relationships only from the document.
             4. Write Manchester frames and apply them in one ontology_apply_batch call.
                Give every root class SubClassOf: Thing so the class is created.
-            5. Summarize the model, list assumptions, and flag gaps or ambiguous requirements.
+            5. Call ontology_save so the generated file is written to disk.
+            6. Summarize the model, list assumptions, and flag gaps or ambiguous requirements.
 
             Prefer reading before writing. Never invent an IRI: resolve it with
             ontology_search first. Report exactly which tools you used.
@@ -330,6 +331,26 @@ public final class Assistant {
 
     private static List<BetaManagedAgentsCustomToolParams> tools() {
         return List.of(
+                tool("document_read",
+                        "Read a PRD, RFQ, or other requirements document from the local filesystem and return "
+                                + "its plain text. Supports PDF, DOCX, and UTF-8 text formats. Use this before "
+                                + "deriving any ontology term from a document; never invent content. "
+                                + "The result may be truncated at 60,000 characters.",
+                        schema(Map.of(
+                                "path", Map.of("type", "string", "description", "Absolute path to the document.")), List.of("path"))),
+                tool("ontology_new",
+                        "Create a new empty OWL ontology at the given path and open it in the workspace. "
+                                + "Use this when the user wants a fresh model built from a PRD or RFQ. "
+                                + "Unsaved edits in the current workspace are discarded.",
+                        schema(Map.of(
+                                "path", Map.of("type", "string", "description", "Absolute path for the new .owl file.")), List.of("path"))),
+                tool("ontology_apply_batch",
+                        "Apply many Manchester frame axioms in one undoable edit. Use this to create the "
+                                + "ontology in a single step after reading a document. Every root class must "
+                                + "include SubClassOf: Thing so the class is created. Returns the rendered "
+                                + "axioms that were added.",
+                        schema(Map.of(
+                                "text", Map.of("type", "string", "description", "One or more Manchester frames separated by blank lines.")), List.of("text"))),
                 tool("ontology_search",
                         "Search the open ontology by label or IRI fragment. Use this first to resolve a "
                                 + "class, property, or individual to an exact IRI before any read or write. "

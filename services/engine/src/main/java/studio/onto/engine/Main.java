@@ -93,6 +93,8 @@ public final class Main {
         app.post("/axiom/subclass/remove", ctx -> workspace.removeSubclass(ctx.bodyAsClass(SubclassRequest.class), ctx));
         app.post("/ontology/save", ctx -> workspace.save(ctx.bodyAsClass(SaveRequest.class), ctx));
         app.post("/axiom/add-text", ctx -> workspace.addAxiomText(ctx.bodyAsClass(AxiomTextRequest.class), ctx));
+        app.post("/axiom/validate", ctx -> workspace.validateAxiomText(ctx.bodyAsClass(AxiomTextRequest.class), ctx));
+        app.get("/plugins", workspace::plugins);
         app.post("/axiom/remove-text", ctx -> workspace.removeAxiomText(ctx.bodyAsClass(AxiomTextRequest.class), ctx));
         app.post("/axiom/remove-rendered", ctx -> workspace.removeRenderedAxiom(ctx.bodyAsClass(RenderedAxiomRequest.class), ctx));
         app.post("/undo", workspace::undo);

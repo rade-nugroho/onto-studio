@@ -1,0 +1,18 @@
+# Sample plugin
+
+Adds an action `sample:deprecate` that marks an entity with `owl:deprecated`.
+
+## Build
+
+```bash
+cd examples/plugin-sample
+ENGINE=../../services/engine/target/engine.jar
+javac -cp "$ENGINE" -d out $(find src -name '*.java')
+cp -R META-INF out/
+jar cf sample-plugin.jar -C out .
+mkdir -p ~/.onto-studio/plugins
+cp sample-plugin.jar ~/.onto-studio/plugins/
+```
+
+Restart the engine (or the app) and check `GET /plugins`; the action appears in
+`/action/preview` and `/action/commit` under the name `sample:deprecate`.

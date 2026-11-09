@@ -28,6 +28,13 @@ The script builds the engine jar, starts Vite, then runs the Tauri shell.
 The shell spawns `services/engine/target/engine.jar` on an ephemeral port and
 passes the port and session token to the UI through the `engine_info` command.
 
+## Plugins
+
+Third-party actions implement `studio.onto.engine.plugin.Plugin` and are
+discovered with `ServiceLoader` on the classpath and from
+`~/.onto-studio/plugins/*.jar`. See `examples/plugin-sample` for a working
+plugin and `GET /plugins` for the loaded list.
+
 ## Actions
 
 Declared actions, previewed before they apply:

@@ -4,6 +4,7 @@ import io.javalin.http.Context;
 import org.coode.owlapi.manchesterowlsyntax.ManchesterOWLSyntaxEditorParser;
 import org.semanticweb.owlapi.apibinding.OWLManager;
 import org.semanticweb.owlapi.dlsyntax.renderer.DLSyntaxObjectRenderer;
+import org.semanticweb.owlapi.expression.OWLEntityChecker;
 import org.semanticweb.owlapi.expression.ShortFormEntityChecker;
 import org.semanticweb.owlapi.formats.RDFXMLDocumentFormat;
 import org.semanticweb.owlapi.io.FileDocumentSource;
@@ -20,6 +21,7 @@ import org.semanticweb.owlapi.model.OWLDataProperty;
 import org.semanticweb.owlapi.model.OWLDatatype;
 import org.semanticweb.owlapi.model.OWLEntity;
 import org.semanticweb.owlapi.model.OWLIndividual;
+import org.semanticweb.owlapi.model.OWLNamedIndividual;
 import org.semanticweb.owlapi.model.OWLObjectProperty;
 import org.semanticweb.owlapi.model.OWLOntology;
 import org.semanticweb.owlapi.model.OWLOntologyChange;
@@ -32,6 +34,8 @@ import org.semanticweb.owlapi.search.EntitySearcher;
 import org.semanticweb.owlapi.util.BidirectionalShortFormProviderAdapter;
 import org.semanticweb.owlapi.util.OntologyAxiomPair;
 import org.semanticweb.owlapi.util.SimpleShortFormProvider;
+import studio.onto.engine.plugin.Plugin;
+import studio.onto.engine.plugin.PluginLoader;
 
 import java.io.File;
 import java.util.ArrayDeque;
@@ -47,7 +51,7 @@ import java.util.stream.Stream;
 /**
  * Holds the active ontology, answers queries, and records edits for undo/redo.
  */
-public final class Workspace {
+public final class Workspace implements Plugin.PluginContext {
 
     private static final int SEARCH_LIMIT = 50;
 
@@ -65,6 +69,7 @@ public final class Workspace {
     private String activeBranch;
     private EvidenceStore evidence;
     private MarkingStore markings;
+    private final List<Plugin> plugins = PluginLoader.load();
     private OWLReasoner reasoner;
     private File openedFile;
     private int savedDepth;
@@ -158,7 +163,7 @@ public final class Workspace {
         }
         List<OWLAxiom> axioms;
         try {
-            axioms = parseFrames(text);
+            axioms = parseFrames(text, true);
         } catch (Exception error) {
             ctx.status(400).json(Map.of("error", "Could not parse axioms: " + error.getMessage()));
             return;
@@ -411,7 +416,7 @@ public final class Workspace {
         }
         List<OWLAxiom> axioms;
         try {
-            axioms = parseFrames(request.text());
+            axioms = parseFrames(request.text(), true);
         } catch (Exception error) {
             ctx.status(400).json(Map.of("error", "Could not parse axiom: " + error.getMessage()));
             return;
@@ -432,7 +437,7 @@ public final class Workspace {
         }
         List<OWLAxiom> axioms;
         try {
-            axioms = parseFrames(request.text());
+            axioms = parseFrames(request.text(), false);
         } catch (Exception error) {
             ctx.status(400).json(Map.of("error", "Could not parse axiom: " + error.getMessage()));
             return;
@@ -565,12 +570,14 @@ public final class Workspace {
         return context.toString();
     }
 
-    private List<OWLAxiom> parseFrames(String text) {
+    private List<OWLAxiom> parseFrames(String text, boolean allowNew) {
         ManchesterOWLSyntaxEditorParser parser = new ManchesterOWLSyntaxEditorParser(dataFactory, text);
         parser.setDefaultOntology(ontology);
         BidirectionalShortFormProviderAdapter shortForms =
                 new BidirectionalShortFormProviderAdapter(manager, Set.of(ontology), new SimpleShortFormProvider());
-        parser.setOWLEntityChecker(new ShortFormEntityChecker(shortForms));
+        parser.setOWLEntityChecker(allowNew
+                ? new AutoEntityChecker(new ShortFormEntityChecker(shortForms), ontology, dataFactory)
+                : new ShortFormEntityChecker(shortForms));
         return parser.parseFrames().stream()
                 .filter(pair -> pair.getOntology() == null || pair.getOntology().equals(ontology))
                 .map(OntologyAxiomPair::getAxiom)
@@ -840,6 +847,35 @@ public final class Workspace {
         return result;
     }
 
+    public synchronized void plugins(Context ctx) {
+        ctx.json(Map.of("plugins", plugins.stream().map(plugin -> Map.of(
+                "name", plugin.name(),
+                "actions", plugin.actions().stream().map(action -> Map.of(
+                        "name", action.name(),
+                        "description", action.description(),
+                        "params", action.params())).toList())).toList()));
+    }
+
+    /** Parses axiom text without applying it, so the UI can validate live. */
+    public synchronized void validateAxiomText(Main.AxiomTextRequest request, Context ctx) {
+        if (!requireOntology(ctx)) {
+            return;
+        }
+        String text = request.text() == null ? "" : request.text();
+        if (text.isBlank()) {
+            ctx.json(Map.of("ok", false, "error", "Axiom text is empty", "axioms", List.of()));
+            return;
+        }
+        try {
+            List<OWLAxiom> axioms = parseFrames(text, false);
+            ctx.json(Map.of(
+                    "ok", !axioms.isEmpty(),
+                    "axioms", axioms.stream().map(renderer::render).filter(r -> !r.isBlank()).toList()));
+        } catch (Exception error) {
+            ctx.json(Map.of("ok", false, "error", String.valueOf(error.getMessage()), "axioms", List.of()));
+        }
+    }
+
     public synchronized void getMarking(String iri, Context ctx) {
         if (!requireOntology(ctx)) {
             return;
@@ -918,6 +954,23 @@ public final class Workspace {
         OWLEntity entity = entity(params.get("iri"));
         List<OWLOntologyChange> changes = new ArrayList<>();
         List<String> summary = new ArrayList<>();
+
+        Plugin.PluginAction pluginAction = plugins.stream()
+                .flatMap(plugin -> plugin.actions().stream())
+                .filter(action -> action.name().equals(name))
+                .findFirst()
+                .orElse(null);
+        if (pluginAction != null) {
+            List<Plugin.PluginChange> planned = pluginAction.plan(this, params);
+            for (Plugin.PluginChange change : planned) {
+                changes.add(change.add()
+                        ? new AddAxiom(ontology, change.axiom())
+                        : new RemoveAxiom(ontology, change.axiom()));
+                summary.add((change.add() ? "add: " : "remove: ") + renderer.render(change.axiom()));
+            }
+            return new Plan(name, changes, summary,
+                    entity == null ? List.of() : List.of(entity.getIRI().toString()), params);
+        }
 
         switch (name) {
             case "set-label" -> {
@@ -1041,7 +1094,18 @@ public final class Workspace {
         return "http://www.w3.org/2001/XMLSchema#" + trimmed;
     }
 
-    private OWLEntity entity(String iri) {
+    @Override
+    public OWLOntology ontology() {
+        return ontology;
+    }
+
+    @Override
+    public OWLDataFactory dataFactory() {
+        return dataFactory;
+    }
+
+    @Override
+    public OWLEntity entity(String iri) {
         if (iri == null || iri.isBlank()) {
             return null;
         }
@@ -1166,13 +1230,11 @@ public final class Workspace {
     }
 
     private List<String> annotationsOf(OWLEntity entity) {
-        List<String> annotations = new ArrayList<>();
-        for (OWLAnnotationProperty property : List.of(
-                dataFactory.getRDFSLabel(), dataFactory.getRDFSComment())) {
-            EntitySearcher.getAnnotations(entity, ontology, property).forEach(annotation ->
-                    annotations.add(renderAnnotation(annotation)));
-        }
-        return annotations;
+        return EntitySearcher.getAnnotations(entity, ontology)
+                .map(this::renderAnnotation)
+                .distinct()
+                .limit(20)
+                .toList();
     }
 
     private List<String> axiomsOf(OWLEntity entity) {
@@ -1195,7 +1257,8 @@ public final class Workspace {
         return EntitySearcher.getSubClasses(cls, ontology).findAny().isPresent();
     }
 
-    private String label(OWLEntity entity) {
+    @Override
+    public String label(OWLEntity entity) {
         return EntitySearcher.getAnnotations(entity, ontology, dataFactory.getRDFSLabel())
                 .findFirst()
                 .map(annotation -> annotation.getValue().asLiteral().map(literal -> literal.getLiteral()).orElse(null))
@@ -1224,5 +1287,100 @@ public final class Workspace {
             return "annotation property";
         }
         return "individual";
+    }
+
+    /**
+     * Resolves existing short forms first and creates a new entity when the
+     * name is not in the ontology yet. This lets a batch of Manchester frames
+     * build an ontology from scratch.
+     */
+    private static final class AutoEntityChecker implements OWLEntityChecker {
+
+        private final OWLEntityChecker delegate;
+        private final OWLOntology ontology;
+        private final OWLDataFactory dataFactory;
+
+        AutoEntityChecker(OWLEntityChecker delegate, OWLOntology ontology, OWLDataFactory dataFactory) {
+            this.delegate = delegate;
+            this.ontology = ontology;
+            this.dataFactory = dataFactory;
+        }
+
+        private IRI iri(String name) {
+            if (name.startsWith("<") && name.endsWith(">")) {
+                return IRI.create(name.substring(1, name.length() - 1));
+            }
+            if (name.startsWith("http://") || name.startsWith("https://")) {
+                return IRI.create(name);
+            }
+            String base = ontology.getOntologyID().getOntologyIRI()
+                    .map(IRI::toString)
+                    .orElse("http://onto.studio/generated");
+            return IRI.create(base + "#" + name.replaceAll("\\s+", "_"));
+        }
+
+        @Override
+        public OWLClass getOWLClass(String name) {
+            if ("Thing".equals(name) || "owl:Thing".equals(name)) {
+                return dataFactory.getOWLThing();
+            }
+            if ("Nothing".equals(name) || "owl:Nothing".equals(name)) {
+                return dataFactory.getOWLNothing();
+            }
+            OWLClass found = delegate.getOWLClass(name);
+            return found != null ? found : dataFactory.getOWLClass(iri(name));
+        }
+
+        @Override
+        public OWLObjectProperty getOWLObjectProperty(String name) {
+            if ("topObjectProperty".equals(name) || "owl:topObjectProperty".equals(name)) {
+                return dataFactory.getOWLTopObjectProperty();
+            }
+            if ("bottomObjectProperty".equals(name) || "owl:bottomObjectProperty".equals(name)) {
+                return dataFactory.getOWLBottomObjectProperty();
+            }
+            OWLObjectProperty found = delegate.getOWLObjectProperty(name);
+            return found != null ? found : dataFactory.getOWLObjectProperty(iri(name));
+        }
+
+        @Override
+        public OWLDataProperty getOWLDataProperty(String name) {
+            if ("topDataProperty".equals(name) || "owl:topDataProperty".equals(name)) {
+                return dataFactory.getOWLTopDataProperty();
+            }
+            if ("bottomDataProperty".equals(name) || "owl:bottomDataProperty".equals(name)) {
+                return dataFactory.getOWLBottomDataProperty();
+            }
+            OWLDataProperty found = delegate.getOWLDataProperty(name);
+            return found != null ? found : dataFactory.getOWLDataProperty(iri(name));
+        }
+
+        @Override
+        public OWLAnnotationProperty getOWLAnnotationProperty(String name) {
+            OWLAnnotationProperty found = delegate.getOWLAnnotationProperty(name);
+            return found != null ? found : dataFactory.getOWLAnnotationProperty(iri(name));
+        }
+
+        @Override
+        public OWLDatatype getOWLDatatype(String name) {
+            OWLDatatype found = delegate.getOWLDatatype(name);
+            if (found != null) {
+                return found;
+            }
+            String local = name.startsWith("xsd:") ? name.substring(4) : name;
+            if (java.util.Set.of("string", "integer", "decimal", "boolean", "double", "float",
+                    "dateTime", "date", "time", "anyURI", "nonNegativeInteger")
+                    .contains(local)) {
+                return dataFactory.getOWLDatatype(
+                        IRI.create("http://www.w3.org/2001/XMLSchema#" + local));
+            }
+            return dataFactory.getOWLDatatype(iri(name));
+        }
+
+        @Override
+        public OWLNamedIndividual getOWLIndividual(String name) {
+            OWLNamedIndividual found = delegate.getOWLIndividual(name);
+            return found != null ? found : dataFactory.getOWLNamedIndividual(iri(name));
+        }
     }
 }
