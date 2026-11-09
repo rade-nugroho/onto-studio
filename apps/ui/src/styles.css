@@ -764,3 +764,15 @@ h2 .kind {
   background: #fde8e8;
   color: #9b1c1c;
 }
+
+.plugin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.plugin-actions button {
+  font-size: 12px;
+  padding: 5px 12px;
+}

@@ -27,6 +27,9 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
   const [preview, setPreview] = useState<ActionPreview | null>(null);
   const [pending, setPending] = useState<{ action: string; params: Record<string, string> } | null>(null);
   const [datatype, setDatatype] = useState("xsd:string");
+  const [pluginActions, setPluginActions] = useState<
+    { name: string; description: string; params: Record<string, string> }[]
+  >([]);
   const [validation, setValidation] = useState<{
     ok: boolean;
     axioms: string[];
@@ -86,6 +89,19 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
     },
     [entity.iri, onError, why?.axiom],
   );
+
+  useEffect(() => {
+    api
+      .plugins()
+      .then((result) =>
+        setPluginActions(
+          result.plugins
+            .flatMap((plugin) => plugin.actions)
+            .filter((action) => Object.keys(action.params ?? {}).includes("iri")),
+        ),
+      )
+      .catch(() => setPluginActions([]));
+  }, []);
 
   useEffect(() => {
     api
@@ -379,6 +395,33 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
       </Section>
 
       <Section title="Actions">
+        {pluginActions.length > 0 && (
+          <div className="plugin-actions">
+            {pluginActions.map((action) => (
+              <button
+                key={action.name}
+                disabled={busy}
+                title={action.description}
+                onClick={() => {
+                  const params: Record<string, string> = { iri: entity.iri };
+                  for (const key of Object.keys(action.params)) {
+                    if (key === "iri") {
+                      continue;
+                    }
+                    const value = window.prompt(action.params[key] || key);
+                    if (value === null) {
+                      return;
+                    }
+                    params[key] = value;
+                  }
+                  previewPending(action.name, params);
+                }}
+              >
+                {action.name}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="action-row">
           <input
             placeholder="New label…"

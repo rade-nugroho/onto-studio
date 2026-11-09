@@ -224,7 +224,13 @@ export const api = {
       body: JSON.stringify({ path, includeRestricted }),
     }),
   plugins: () =>
-    call<{ plugins: { name: string; permissions: string[]; actions: { name: string; description: string }[] }[] }>(
+    call<{
+      plugins: {
+        name: string;
+        permissions: string[];
+        actions: { name: string; description: string; params: Record<string, string> }[];
+      }[];
+    }>(
       "/plugins",
     ),
   installPlugin: (url: string, sha256: string) =>
