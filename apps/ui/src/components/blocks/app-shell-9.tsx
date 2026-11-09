@@ -961,7 +961,7 @@ export default function AppShell9({
         <aside
           {...(!sidebarOpen ? ({ inert: "" } as Record<string, unknown>) : {})}
           className={cx(
-            "hidden shrink-0 lg:block",
+            "shrink-0",
             sidebarOpen ? `mr-3 ${sidebarWidth}` : "mr-0 w-0 overflow-hidden",
           )}
         >

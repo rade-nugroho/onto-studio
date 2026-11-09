@@ -153,6 +153,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify(path ? { path } : {}),
     }),
-  search: (query: string) =>
-    call<{ results: SearchResult[] }>(`/search?q=${encodeURIComponent(query)}`),
+  search: (query: string, kind?: string) => {
+    const params = new URLSearchParams({ q: query });
+    if (kind) {
+      params.set("kind", kind);
+    }
+    return call<{ results: SearchResult[] }>(`/search?${params.toString()}`);
+  },
 };

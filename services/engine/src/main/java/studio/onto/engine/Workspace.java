@@ -170,13 +170,14 @@ public final class Workspace {
         ctx.json(response);
     }
 
-    public synchronized void search(String query, Context ctx) {
+    public synchronized void search(String query, String kindFilter, Context ctx) {
         if (ontology == null) {
             ctx.status(409).json(Map.of("error", "No ontology is open"));
             return;
         }
         String needle = query == null ? "" : query.trim().toLowerCase();
-        if (needle.isEmpty()) {
+        boolean hasKind = kindFilter != null && !kindFilter.isBlank();
+        if (needle.isEmpty() && !hasKind) {
             ctx.json(Map.of("results", List.of()));
             return;
         }
@@ -187,7 +188,9 @@ public final class Workspace {
                 ontology.annotationPropertiesInSignature(),
                 ontology.individualsInSignature()).flatMap(stream -> stream);
         List<Map<String, Object>> results = entities
-                .filter(entity -> label(entity).toLowerCase().contains(needle)
+                .filter(entity -> !hasKind || kind(entity).equals(kindFilter))
+                .filter(entity -> needle.isEmpty()
+                        || label(entity).toLowerCase().contains(needle)
                         || entity.getIRI().getShortForm().toLowerCase().contains(needle))
                 .limit(SEARCH_LIMIT)
                 .map(entity -> Map.<String, Object>of(

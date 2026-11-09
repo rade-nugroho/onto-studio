@@ -60,7 +60,8 @@ public final class Main {
                 "true".equals(ctx.queryParam("inferred")),
                 ctx));
         app.get("/entity", ctx -> workspace.entity(ctx.queryParam("iri"), ctx));
-        app.get("/search", ctx -> workspace.search(ctx.queryParam("q"), ctx));
+        app.get("/search", ctx -> workspace.search(
+                ctx.queryParam("q"), ctx.queryParam("kind"), ctx));
         app.post("/axiom/subclass", ctx -> workspace.addSubclass(ctx.bodyAsClass(SubclassRequest.class), ctx));
         app.post("/axiom/subclass/remove", ctx -> workspace.removeSubclass(ctx.bodyAsClass(SubclassRequest.class), ctx));
         app.post("/ontology/save", ctx -> workspace.save(ctx.bodyAsClass(SaveRequest.class), ctx));

@@ -212,6 +212,15 @@ export default function App() {
     }
   }, []);
 
+  const listKind = useCallback(async (kind: string) => {
+    setQuery("");
+    try {
+      setResults((await api.search("", kind)).results);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }, []);
+
   const commands = useMemo<Command[]>(
     () => [
       { id: "open", group: "Ontology", title: "Open ontology…", icon: File02Icon, shortcut: "⌘O" },
@@ -296,10 +305,34 @@ export default function App() {
           ]}
           onSelect={(group, item) => {
             if (group === "Reasoner") {
-              toggleReasoner();
+              if ((item === "Start") !== reasoning) {
+                toggleReasoner();
+              }
               return;
             }
-            runSearch(item === "All classes" || item === "Top level" ? "" : item);
+            if (group === "Classes") {
+              setResults([]);
+              setQuery("");
+              setView("tree");
+              return;
+            }
+            if (group === "Properties") {
+              listKind(
+                item === "Object properties"
+                  ? "object property"
+                  : item === "Data properties"
+                    ? "data property"
+                    : "annotation property",
+              );
+              return;
+            }
+            if (item === "All individuals") {
+              listKind("individual");
+              return;
+            }
+            setResults([]);
+            setQuery("");
+            setView("tree");
           }}
         />
       }

@@ -27,6 +27,13 @@ cargo build
 
 Full dev run: `./scripts/dev.sh`.
 
+## UI conventions
+
+- Tailwind utilities in `apps/ui` size things in `rem`. Never set `font-size` on
+  `:root`; set it on `.app` so the 16px rem scale (and therefore every Tailwind
+  spacing/size class) stays intact.
+- Tailwind Preflight is enabled; React Bits blocks depend on its button reset.
+
 ## Conventions
 
 - Engine binds 127.0.0.1 only and requires `X-Engine-Token` on every request.
