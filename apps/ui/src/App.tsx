@@ -321,6 +321,7 @@ export default function App() {
         title: assistantOpen ? "Hide assistant" : "Show assistant",
         icon: SparklesIcon,
       },
+      { id: "plugin-install", group: "Plugins", title: "Install plugin…", icon: SparklesIcon },
       { id: "search", group: "Navigation", title: "Focus search", icon: Search01Icon },
     ],
     [reasoning, assistantOpen],
@@ -353,6 +354,21 @@ export default function App() {
         case "assistant":
           setAssistantOpen((open) => !open);
           break;
+        case "plugin-install": {
+          const url = window.prompt("Plugin jar URL");
+          if (!url) {
+            break;
+          }
+          const sha256 = window.prompt("SHA-256 of the jar (pinned)");
+          if (!sha256) {
+            break;
+          }
+          api
+            .installPlugin(url, sha256)
+            .then((result) => setError(`Installed ${result.installed} (${result.plugins} plugins loaded)`))
+            .catch((e: Error) => setError(e.message));
+          break;
+        }
         case "search":
           document.querySelector<HTMLInputElement>("input.search")?.focus();
           break;

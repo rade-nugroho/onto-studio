@@ -2,6 +2,9 @@
 
 Adds an action `sample:deprecate` that marks an entity with `owl:deprecated`.
 
+The plugin only reads the ontology and returns proposed changes; the engine
+applies them. It declares the default permission set (`read`).
+
 ## Build
 
 ```bash

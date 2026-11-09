@@ -137,6 +137,60 @@ class EngineApiTest {
     }
 
     @Test
+    void pluginsWithoutGrantedPermissionsAreSkipped() {
+        JavalinTest.test(Main.createApp(new Workspace(), "test"), (server, client) -> {
+            open(client);
+            String plugins = body(client.get("/plugins", HEADERS));
+            assertTrue(plugins.contains("example"), plugins);
+            assertTrue(plugins.contains("\"permissions\""), plugins);
+            assertFalse(plugins.contains("writer"), plugins);
+        });
+    }
+
+    @Test
+    void installsPluginOnlyWithMatchingChecksum(@TempDir Path home) throws Exception {
+        byte[] bytes = "not really a jar".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        com.sun.net.httpserver.HttpServer http = com.sun.net.httpserver.HttpServer.create(
+                new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        http.createContext("/plugin.jar", exchange -> {
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        http.start();
+        String url = "http://127.0.0.1:" + http.getAddress().getPort() + "/plugin.jar";
+        String digest = sha256Hex(bytes);
+
+        String previousHome = System.getProperty("user.home");
+        System.setProperty("user.home", home.toString());
+        try {
+            JavalinTest.test(Main.createApp(new Workspace(), "test"), (server, client) -> {
+                String bad = body(client.post("/plugins/install",
+                        "{\"url\":\"" + url + "\",\"sha256\":\"deadbeef\"}", HEADERS));
+                assertTrue(bad.contains("Checksum mismatch"), bad);
+
+                String good = body(client.post("/plugins/install",
+                        "{\"url\":\"" + url + "\",\"sha256\":\"" + digest + "\"}", HEADERS));
+                assertTrue(good.contains("installed"), good);
+                assertTrue(Files.exists(home.resolve(".onto-studio/plugins/plugin.jar")),
+                        "plugin jar should be written to the plugins directory");
+            });
+        } finally {
+            System.setProperty("user.home", previousHome);
+            http.stop(0);
+        }
+    }
+
+    private static String sha256Hex(byte[] bytes) throws Exception {
+        byte[] hash = java.security.MessageDigest.getInstance("SHA-256").digest(bytes);
+        StringBuilder hex = new StringBuilder();
+        for (byte b : hash) {
+            hex.append(String.format("%02x", b));
+        }
+        return hex.toString();
+    }
+
+    @Test
     void pluginActionsAreDiscoveredAndApplied(@TempDir Path tempDir) throws Exception {
         Path copy = tempDir.resolve("pizza.owl");
         Files.copy(Path.of(PIZZA), copy);

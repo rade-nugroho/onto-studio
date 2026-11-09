@@ -69,7 +69,7 @@ public final class Workspace implements Plugin.PluginContext {
     private String activeBranch;
     private EvidenceStore evidence;
     private MarkingStore markings;
-    private final List<Plugin> plugins = PluginLoader.load();
+    private final List<Plugin> plugins = new ArrayList<>(PluginLoader.load());
     private OWLReasoner reasoner;
     private File openedFile;
     private int savedDepth;
@@ -850,10 +850,80 @@ public final class Workspace implements Plugin.PluginContext {
     public synchronized void plugins(Context ctx) {
         ctx.json(Map.of("plugins", plugins.stream().map(plugin -> Map.of(
                 "name", plugin.name(),
+                "permissions", plugin.permissions(),
                 "actions", plugin.actions().stream().map(action -> Map.of(
                         "name", action.name(),
                         "description", action.description(),
                         "params", action.params())).toList())).toList()));
+    }
+
+    /**
+     * Installs a plugin jar from a URL after verifying its SHA-256 digest, then
+     * reloads the plugin list. Distribution stays explicit: the caller pins the
+     * exact artifact it trusts.
+     */
+    public synchronized void installPlugin(Main.PluginInstallRequest request, Context ctx) {
+        if (request.url() == null || request.url().isBlank()
+                || request.sha256() == null || request.sha256().isBlank()) {
+            ctx.status(400).json(Map.of("error", "Both url and sha256 are required"));
+            return;
+        }
+        byte[] bytes;
+        try {
+            var client = java.net.http.HttpClient.newHttpClient();
+            var httpRequest = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(request.url()))
+                    .timeout(java.time.Duration.ofSeconds(30))
+                    .GET()
+                    .build();
+            var response = client.send(httpRequest, java.net.http.HttpResponse.BodyHandlers.ofByteArray());
+            if (response.statusCode() != 200) {
+                ctx.status(400).json(Map.of("error", "Download failed: HTTP " + response.statusCode()));
+                return;
+            }
+            bytes = response.body();
+        } catch (Exception error) {
+            ctx.status(400).json(Map.of("error", "Download failed: " + error.getMessage()));
+            return;
+        }
+        if (bytes.length > 5 * 1024 * 1024) {
+            ctx.status(400).json(Map.of("error", "Plugin jar is larger than 5 MB"));
+            return;
+        }
+        String digest = sha256(bytes);
+        if (!digest.equalsIgnoreCase(request.sha256().trim())) {
+            ctx.status(400).json(Map.of("error", "Checksum mismatch",
+                    "expected", request.sha256().trim(), "actual", digest));
+            return;
+        }
+        String fileName = request.url().substring(request.url().lastIndexOf('/') + 1);
+        if (!fileName.endsWith(".jar")) {
+            fileName = "plugin-" + digest.substring(0, 8) + ".jar";
+        }
+        try {
+            java.nio.file.Path dir = PluginLoader.pluginsDirectory();
+            java.nio.file.Files.createDirectories(dir);
+            java.nio.file.Path target = dir.resolve(fileName);
+            java.nio.file.Files.write(target, bytes);
+            plugins.clear();
+            plugins.addAll(PluginLoader.load());
+            ctx.json(Map.of("installed", target.getFileName().toString(), "plugins", plugins.size()));
+        } catch (Exception error) {
+            ctx.status(500).json(Map.of("error", "Could not install plugin: " + error.getMessage()));
+        }
+    }
+
+    private static String sha256(byte[] bytes) {
+        try {
+            byte[] hash = java.security.MessageDigest.getInstance("SHA-256").digest(bytes);
+            StringBuilder hex = new StringBuilder();
+            for (byte b : hash) {
+                hex.append(String.format("%02x", b));
+            }
+            return hex.toString();
+        } catch (Exception error) {
+            throw new IllegalStateException(error);
+        }
     }
 
     /** Parses axiom text without applying it, so the UI can validate live. */
@@ -961,7 +1031,12 @@ public final class Workspace implements Plugin.PluginContext {
                 .findFirst()
                 .orElse(null);
         if (pluginAction != null) {
+            int axiomCountBefore = ontology.getAxiomCount();
             List<Plugin.PluginChange> planned = pluginAction.plan(this, params);
+            if (ontology.getAxiomCount() != axiomCountBefore) {
+                throw new IllegalStateException(
+                        "Plugin " + pluginAction.name() + " mutated the ontology while planning");
+            }
             for (Plugin.PluginChange change : planned) {
                 changes.add(change.add()
                         ? new AddAxiom(ontology, change.axiom())
@@ -1094,11 +1169,6 @@ public final class Workspace implements Plugin.PluginContext {
             return "http://www.w3.org/2001/XMLSchema#" + parts[1];
         }
         return "http://www.w3.org/2001/XMLSchema#" + trimmed;
-    }
-
-    @Override
-    public OWLOntology ontology() {
-        return ontology;
     }
 
     @Override
@@ -1239,7 +1309,13 @@ public final class Workspace implements Plugin.PluginContext {
                 .toList();
     }
 
-    private List<String> axiomsOf(OWLEntity entity) {
+    @Override
+    public List<OWLEntity> entities() {
+        return ontology.signature().toList();
+    }
+
+    @Override
+    public List<String> axiomsOf(OWLEntity entity) {
         return ontology.getReferencingAxioms(entity).stream()
                 .filter(axiom -> !axiom.isAnnotationAxiom())
                 .filter(axiom -> !axiom.isOfType(AxiomType.DECLARATION))

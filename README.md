@@ -35,6 +35,24 @@ discovered with `ServiceLoader` on the classpath and from
 `~/.onto-studio/plugins/*.jar`. See `examples/plugin-sample` for a working
 plugin and `GET /plugins` for the loaded list.
 
+Plugins get a narrow read-only context (`dataFactory`, `entity`, `label`,
+`entities`, `axiomsOf`) and only *propose* changes; the engine applies them, so
+evidence and audit still cover every edit. A plugin may declare
+`permissions()`; only `read` is granted, and a plugin asking for more is skipped
+at load time. The engine also rejects a plugin whose planning mutated the
+ontology.
+
+Install with integrity pinning:
+
+```bash
+curl -X POST http://127.0.0.1:PORT/plugins/install \
+  -H "X-Engine-Token: ..." -H "Content-Type: application/json" \
+  -d '{"url":"https://example.com/plugin.jar","sha256":"<digest>"}'
+```
+
+The jar must be under 5 MB and match the digest; the plugin list reloads
+immediately. In the app, run **Install plugin…** from the command palette.
+
 ## Actions
 
 Declared actions, previewed before they apply:

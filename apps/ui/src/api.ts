@@ -223,6 +223,15 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ path, includeRestricted }),
     }),
+  plugins: () =>
+    call<{ plugins: { name: string; permissions: string[]; actions: { name: string; description: string }[] }[] }>(
+      "/plugins",
+    ),
+  installPlugin: (url: string, sha256: string) =>
+    call<{ installed: string; plugins: number }>("/plugins/install", {
+      method: "POST",
+      body: JSON.stringify({ url, sha256 }),
+    }),
   branches: () => call<{ branches: BranchInfo[] }>("/branch/list"),
   createBranch: (name: string) =>
     call<{ name: string; axioms: number }>("/branch/create", {
