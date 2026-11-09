@@ -28,6 +28,20 @@ The script builds the engine jar, starts Vite, then runs the Tauri shell.
 The shell spawns `services/engine/target/engine.jar` on an ephemeral port and
 passes the port and session token to the UI through the `engine_info` command.
 
+## Actions
+
+Declared actions, previewed before they apply:
+
+| Action | Params | Effect |
+|---|---|---|
+| `set-label` | `iri`, `label` | Replace the label (all languages) |
+| `add-subclass` / `remove-subclass` | `iri`, `parent` | Subclass axiom |
+| `set-domain` | `iri`, `class` | Replace a property's domain |
+| `set-range` | `iri`, `class` (object) or `datatype` (data) | Replace a property's range |
+| `add-type` / `remove-type` | `iri`, `class` | Class assertion on an individual |
+
+Free-form Manchester axioms remain available through `POST /axiom/add-text`.
+
 ## Markings
 
 Markings live in `.onto-studio/markings.json` next to the ontology. `Export`

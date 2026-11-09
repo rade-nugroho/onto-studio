@@ -61,6 +61,27 @@ public final class Main {
 
         app.get("/health", ctx -> ctx.json(Map.of("status", "ok", "version", "0.1.0")));
         app.post("/ontology/open", ctx -> workspace.open(ctx.bodyAsClass(OpenRequest.class), ctx));
+        app.post("/ontology/new", ctx -> workspace.newOntology(
+                ctx.bodyAsClass(SaveRequest.class).path(), ctx));
+        app.post("/document/extract", ctx -> {
+            String path = ctx.bodyAsClass(OpenRequest.class).path();
+            try {
+                java.nio.file.Path file = java.nio.file.Path.of(path);
+                if (!java.nio.file.Files.isRegularFile(file)) {
+                    ctx.status(400).json(Map.of("error", "File not found: " + path));
+                    return;
+                }
+                String text = DocumentText.extract(file);
+                ctx.json(Map.of(
+                        "path", file.toAbsolutePath().toString(),
+                        "chars", text.length(),
+                        "text", text));
+            } catch (Exception error) {
+                ctx.status(400).json(Map.of("error", "Could not read document: " + error.getMessage()));
+            }
+        });
+        app.post("/axiom/batch", ctx -> workspace.addAxiomsBatch(
+                ctx.bodyAsClass(AxiomTextRequest.class).text(), ctx));
         app.get("/hierarchy", ctx -> workspace.hierarchy(
                 ctx.queryParam("parent"),
                 "true".equals(ctx.queryParam("inferred")),

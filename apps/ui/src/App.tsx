@@ -64,14 +64,18 @@ export default function App() {
     setError(null);
     try {
       let path: string | null = null;
-      try {
-        const { open } = await import("@tauri-apps/plugin-dialog");
-        path = await open({
-          multiple: false,
-          filters: [{ name: "Ontology", extensions: ["owl", "ttl", "rdf", "xml", "ofn"] }],
-        });
-      } catch {
-        // Browser dev mode has no native dialog.
+      const inTauri = "__TAURI_INTERNALS__" in window;
+      if (inTauri) {
+        try {
+          const { open } = await import("@tauri-apps/plugin-dialog");
+          path = await open({
+            multiple: false,
+            filters: [{ name: "Ontology", extensions: ["owl", "ttl", "rdf", "xml", "ofn"] }],
+          });
+        } catch {
+          path = window.prompt("Ontology file path");
+        }
+      } else {
         path = window.prompt("Ontology file path");
       }
       if (typeof path === "string") {

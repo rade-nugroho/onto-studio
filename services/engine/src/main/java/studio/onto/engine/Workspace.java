@@ -17,6 +17,7 @@ import org.semanticweb.owlapi.model.OWLClass;
 import org.semanticweb.owlapi.model.OWLClassExpression;
 import org.semanticweb.owlapi.model.OWLDataFactory;
 import org.semanticweb.owlapi.model.OWLDataProperty;
+import org.semanticweb.owlapi.model.OWLDatatype;
 import org.semanticweb.owlapi.model.OWLEntity;
 import org.semanticweb.owlapi.model.OWLIndividual;
 import org.semanticweb.owlapi.model.OWLObjectProperty;
@@ -117,6 +118,59 @@ public final class Workspace {
 
     public synchronized String currentPath() {
         return openedFile == null ? null : openedFile.getAbsolutePath();
+    }
+
+    public synchronized void newOntology(String path, Context ctx) {
+        if (path == null || path.isBlank()) {
+            ctx.status(400).json(Map.of("error", "Missing path"));
+            return;
+        }
+        File file = new File(path);
+        try {
+            File parent = file.getParentFile();
+            if (parent != null) {
+                parent.mkdirs();
+            }
+            manager.getOntologies().forEach(manager::removeOntology);
+            ontology = manager.createOntology(IRI.create(file.toURI()));
+            stopReasonerInternal();
+            openedFile = file;
+            undoStack.clear();
+            redoStack.clear();
+            savedDepth = 0;
+            manager.saveOntology(ontology, new RDFXMLDocumentFormat(), IRI.create(file));
+            ctx.json(Map.of(
+                    "iri", ontology.getOntologyID().getOntologyIRI().map(IRI::toString).orElse(""),
+                    "path", file.getAbsolutePath(),
+                    "axiomCount", 0,
+                    "entityCount", 0,
+                    "dirty", false,
+                    "canUndo", false,
+                    "canRedo", false));
+        } catch (Exception error) {
+            ctx.status(400).json(Map.of("error", "Could not create " + file + ": " + error.getMessage()));
+        }
+    }
+
+    public synchronized void addAxiomsBatch(String text, Context ctx) {
+        if (!requireOntology(ctx)) {
+            return;
+        }
+        List<OWLAxiom> axioms;
+        try {
+            axioms = parseFrames(text);
+        } catch (Exception error) {
+            ctx.status(400).json(Map.of("error", "Could not parse axioms: " + error.getMessage()));
+            return;
+        }
+        if (axioms.isEmpty()) {
+            ctx.status(400).json(Map.of("error", "No axiom found in text"));
+            return;
+        }
+        apply(axioms.stream().map(axiom -> (OWLOntologyChange) new AddAxiom(ontology, axiom)).toList());
+        Map<String, Object> response = new LinkedHashMap<>(state());
+        response.put("added", axioms.stream().map(renderer::render).toList());
+        ctx.json(response);
     }
 
     public synchronized void hierarchy(String parentIri, boolean inferred, Context ctx) {
@@ -901,6 +955,71 @@ public final class Workspace {
                 changes.add(new RemoveAxiom(ontology, dataFactory.getOWLSubClassOfAxiom(child, sup)));
                 summary.add("remove: " + label(child) + " sub " + label(sup));
             }
+            case "set-domain" -> {
+                require(entity, "iri");
+                OWLEntity domain = entity(params.get("class"));
+                require(domain, "class");
+                OWLClassExpression domainExpr = domain.asOWLClass();
+                if (entity instanceof OWLObjectProperty property) {
+                    EntitySearcher.getDomains(property, ontology).toList()
+                            .forEach(existing -> changes.add(new RemoveAxiom(ontology,
+                                    dataFactory.getOWLObjectPropertyDomainAxiom(property, existing))));
+                    changes.add(new AddAxiom(ontology,
+                            dataFactory.getOWLObjectPropertyDomainAxiom(property, domainExpr)));
+                } else if (entity instanceof OWLDataProperty property) {
+                    EntitySearcher.getDomains(property, ontology).toList()
+                            .forEach(existing -> changes.add(new RemoveAxiom(ontology,
+                                    dataFactory.getOWLDataPropertyDomainAxiom(property, existing))));
+                    changes.add(new AddAxiom(ontology,
+                            dataFactory.getOWLDataPropertyDomainAxiom(property, domainExpr)));
+                } else {
+                    throw new IllegalArgumentException("Domains apply to properties only");
+                }
+                summary.add("set domain: " + label(domain));
+            }
+            case "set-range" -> {
+                require(entity, "iri");
+                if (entity instanceof OWLObjectProperty property) {
+                    OWLEntity range = entity(params.get("class"));
+                    require(range, "class");
+                    EntitySearcher.getRanges(property, ontology).toList()
+                            .forEach(existing -> changes.add(new RemoveAxiom(ontology,
+                                    dataFactory.getOWLObjectPropertyRangeAxiom(property, existing))));
+                    changes.add(new AddAxiom(ontology,
+                            dataFactory.getOWLObjectPropertyRangeAxiom(property, range.asOWLClass())));
+                    summary.add("set range: " + label(range));
+                } else if (entity instanceof OWLDataProperty property) {
+                    String datatype = params.get("datatype");
+                    if (datatype == null || datatype.isBlank()) {
+                        throw new IllegalArgumentException("Missing datatype");
+                    }
+                    OWLDatatype range = dataFactory.getOWLDatatype(IRI.create(datatypeIri(datatype)));
+                    EntitySearcher.getRanges(property, ontology).toList()
+                            .forEach(existing -> changes.add(new RemoveAxiom(ontology,
+                                    dataFactory.getOWLDataPropertyRangeAxiom(property, existing))));
+                    changes.add(new AddAxiom(ontology,
+                            dataFactory.getOWLDataPropertyRangeAxiom(property, range)));
+                    summary.add("set range: " + datatype);
+                } else {
+                    throw new IllegalArgumentException("Ranges apply to properties only");
+                }
+            }
+            case "add-type" -> {
+                require(entity, "iri");
+                OWLEntity type = entity(params.get("class"));
+                require(type, "class");
+                changes.add(new AddAxiom(ontology,
+                        dataFactory.getOWLClassAssertionAxiom(type.asOWLClass(), entity.asOWLNamedIndividual())));
+                summary.add("add type: " + label(type));
+            }
+            case "remove-type" -> {
+                require(entity, "iri");
+                OWLEntity type = entity(params.get("class"));
+                require(type, "class");
+                changes.add(new RemoveAxiom(ontology,
+                        dataFactory.getOWLClassAssertionAxiom(type.asOWLClass(), entity.asOWLNamedIndividual())));
+                summary.add("remove type: " + label(type));
+            }
             default -> throw new IllegalArgumentException("Unknown action: " + name);
         }
 
@@ -908,6 +1027,18 @@ public final class Workspace {
                 ? List.of()
                 : List.of(entity.getIRI().toString());
         return new Plan(name, changes, summary, entities, params);
+    }
+
+    private static String datatypeIri(String name) {
+        String trimmed = name.trim();
+        if (trimmed.startsWith("http://") || trimmed.startsWith("https://") || trimmed.startsWith("urn:")) {
+            return trimmed;
+        }
+        if (trimmed.contains(":")) {
+            String[] parts = trimmed.split(":", 2);
+            return "http://www.w3.org/2001/XMLSchema#" + parts[1];
+        }
+        return "http://www.w3.org/2001/XMLSchema#" + trimmed;
     }
 
     private OWLEntity entity(String iri) {

@@ -50,15 +50,24 @@ public final class Assistant {
             Use the ontology tools to inspect the open ontology before you answer.
             Read tools: ontology_search, ontology_entity, ontology_list.
             Write tools: ontology_add_subclass, ontology_remove_subclass,
-            ontology_add_axiom, ontology_remove_axiom.
-            File tools: ontology_open, ontology_save.
+            ontology_add_axiom, ontology_remove_axiom, ontology_apply_batch.
+            File tools: ontology_open, ontology_new, ontology_save, document_read.
+
+            When the user gives a PRD, RFQ, or other requirements document:
+            1. Call document_read for every source path. Never guess content you did not read.
+            2. If the user wants a new model, call ontology_new with an .owl path first.
+            3. Derive classes, object properties, data properties, and relationships only from the document.
+            4. Write Manchester frames and apply them in one ontology_apply_batch call.
+               Give every root class SubClassOf: Thing so the class is created.
+            5. Summarize the model, list assumptions, and flag gaps or ambiguous requirements.
+
             Prefer reading before writing. Never invent an IRI: resolve it with
             ontology_search first. Report exactly which tools you used.
             Axioms use DL syntax: subsumption is A sub B, existential is
             A sub exists r.B. Keep answers short and factual.
             """;
 
-    private static final int MAX_TOOL_OUTPUT = 20_000;
+    private static final int MAX_TOOL_OUTPUT = 50_000;
     private static final String DEFAULT_MODEL = "claude-sonnet-5";
     private static final AnthropicBeta BETA = AnthropicBeta.MANAGED_AGENTS_2026_04_01;
     private static final Duration TOOL_TIMEOUT = Duration.ofSeconds(30);
@@ -255,6 +264,12 @@ public final class Assistant {
                         ? post("/ontology/save", Map.of())
                         : post("/ontology/save", Map.of("path", text(args, "path")));
                 case "ontology_open" -> post("/ontology/open", Map.of(
+                        "path", require(args, "path")));
+                case "ontology_new" -> post("/ontology/new", Map.of(
+                        "path", require(args, "path")));
+                case "ontology_apply_batch" -> post("/axiom/batch", Map.of(
+                        "text", require(args, "text")));
+                case "document_read" -> post("/document/extract", Map.of(
                         "path", require(args, "path")));
                 default -> "Unknown tool: " + name;
             };

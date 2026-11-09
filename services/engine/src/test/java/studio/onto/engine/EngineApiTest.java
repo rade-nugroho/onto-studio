@@ -137,6 +137,31 @@ class EngineApiTest {
     }
 
     @Test
+    void propertyAndIndividualActions(@TempDir Path tempDir) throws Exception {
+        Path copy = tempDir.resolve("pizza.owl");
+        Files.copy(Path.of(PIZZA), copy);
+        JavalinTest.test(Main.createApp(new Workspace(), "test"), (server, client) -> {
+            body(client.post("/ontology/open", "{\"path\":\"" + copy + "\"}", HEADERS));
+
+            String domain = body(client.post("/action/commit",
+                    "{\"action\":\"set-domain\",\"params\":{\"iri\":\"" + NS
+                            + "hasTopping\",\"class\":\"" + NS + "Pizza\"}}", HEADERS));
+            assertTrue(domain.contains("set domain"), domain);
+
+            String property = body(client.get("/entity?iri=" + encoded("hasTopping"), HEADERS));
+            assertTrue(property.contains("\"label\":\"Pizza\""), property);
+
+            String type = body(client.post("/action/commit",
+                    "{\"action\":\"add-type\",\"params\":{\"iri\":\"" + NS
+                            + "America\",\"class\":\"" + NS + "Country\"}}", HEADERS));
+            assertTrue(type.contains("add type"), type);
+
+            String individual = body(client.get("/entity?iri=" + encoded("America"), HEADERS));
+            assertTrue(individual.contains("\"types\":[{\""), individual);
+        });
+    }
+
+    @Test
     void markingsFilterExports(@TempDir Path tempDir) throws Exception {
         Path copy = tempDir.resolve("pizza.owl");
         Files.copy(Path.of(PIZZA), copy);

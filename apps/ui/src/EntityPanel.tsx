@@ -25,6 +25,8 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
   const [why, setWhy] = useState<WhyResult | null>(null);
   const [labelDraft, setLabelDraft] = useState("");
   const [preview, setPreview] = useState<ActionPreview | null>(null);
+  const [pending, setPending] = useState<{ action: string; params: Record<string, string> } | null>(null);
+  const [datatype, setDatatype] = useState("xsd:string");
   const [audit, setAudit] = useState<AuditRow[]>([]);
 
   const run = useCallback(
@@ -88,30 +90,28 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
       .catch(() => setAudit([]));
   }, [entity.iri]);
 
-  const previewLabel = useCallback(async () => {
-    if (!labelDraft.trim()) {
-      return;
-    }
-    try {
-      setPreview(
-        await api.previewAction("set-label", { iri: entity.iri, label: labelDraft.trim() }),
-      );
-    } catch (error) {
-      onError((error as Error).message);
-    }
-  }, [entity.iri, labelDraft, onError]);
+  const previewPending = useCallback(
+    async (action: string, params: Record<string, string>) => {
+      try {
+        setPending({ action, params });
+        setPreview(await api.previewAction(action, params));
+      } catch (error) {
+        setPending(null);
+        onError((error as Error).message);
+      }
+    },
+    [onError],
+  );
 
-  const commitLabel = useCallback(async () => {
-    if (!preview) {
+  const commitPending = useCallback(async () => {
+    if (!pending) {
       return;
     }
     try {
-      const result = await api.commitAction("set-label", {
-        iri: entity.iri,
-        label: labelDraft.trim(),
-      });
+      const result = await api.commitAction(pending.action, pending.params);
       onEdited(result);
       setPreview(null);
+      setPending(null);
       setLabelDraft("");
       setAudit(
         (await api.audit()).rows
@@ -121,7 +121,7 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
     } catch (error) {
       onError((error as Error).message);
     }
-  }, [entity.iri, labelDraft, onEdited, onError, preview]);
+  }, [entity.iri, onEdited, onError, pending]);
 
   const addAxiom = useCallback(async () => {
     const text = axiomText.trim();
@@ -155,6 +155,32 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
       </h2>
       <div className="iri">{entity.iri}</div>
       <div className="usage">{entity.usage} referencing axioms</div>
+
+      {preview && pending && (
+        <div className="preview">
+          <div className="preview-head">
+            {pending.action} · {preview.summary.length} changes
+          </div>
+          <ul className="why-list">
+            {preview.changes.map((change) => (
+              <li key={change} className="axiom">
+                {change}
+              </li>
+            ))}
+          </ul>
+          <div className="row-actions">
+            <button onClick={commitPending}>Commit</button>
+            <button
+              onClick={() => {
+                setPreview(null);
+                setPending(null);
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {entity.kind === "class" && (
         <Section title="Subclasses">
@@ -198,19 +224,62 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
       )}
 
       {entity.kind === "object property" && (
-        <RefsSection title="Domain" items={entity.domains} onSelect={onSelect} />
+        <Section title="Domain">
+          <RefsSection title="" items={entity.domains} onSelect={onSelect} />
+          <EntityPicker
+            placeholder="Set domain class…"
+            onPick={(classIri) => previewPending("set-domain", { iri: entity.iri, class: classIri })}
+          />
+        </Section>
       )}
       {entity.kind === "object property" && (
-        <RefsSection title="Range" items={entity.ranges} onSelect={onSelect} />
+        <Section title="Range">
+          <RefsSection title="" items={entity.ranges} onSelect={onSelect} />
+          <EntityPicker
+            placeholder="Set range class…"
+            onPick={(classIri) => previewPending("set-range", { iri: entity.iri, class: classIri })}
+          />
+        </Section>
       )}
       {entity.kind === "data property" && (
-        <RefsSection title="Domain" items={entity.domains} onSelect={onSelect} />
+        <Section title="Domain">
+          <RefsSection title="" items={entity.domains} onSelect={onSelect} />
+          <EntityPicker
+            placeholder="Set domain class…"
+            onPick={(classIri) => previewPending("set-domain", { iri: entity.iri, class: classIri })}
+          />
+        </Section>
       )}
       {entity.kind === "data property" && (
-        <RefsSection title="Range" items={entity.ranges} onSelect={onSelect} />
+        <Section title="Range">
+          <RefsSection title="" items={entity.ranges} onSelect={onSelect} />
+          <div className="action-row">
+            <input value={datatype} onChange={(event) => setDatatype(event.target.value)} />
+            <button
+              onClick={() => previewPending("set-range", { iri: entity.iri, datatype })}
+              disabled={!datatype.trim()}
+            >
+              Preview
+            </button>
+          </div>
+        </Section>
       )}
       {entity.kind === "individual" && (
-        <RefsSection title="Types" items={entity.types} onSelect={onSelect} />
+        <Section title="Types">
+          {entity.types.map((type) => (
+            <RefRow
+              key={type.iri}
+              item={type}
+              onOpen={() => onSelect(type.iri)}
+              onRemove={() => previewPending("remove-type", { iri: entity.iri, class: type.iri })}
+              disabled={busy}
+            />
+          ))}
+          <EntityPicker
+            placeholder="Add type…"
+            onPick={(classIri) => previewPending("add-type", { iri: entity.iri, class: classIri })}
+          />
+        </Section>
       )}
 
       <Section title="Annotations">
@@ -282,26 +351,13 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
             value={labelDraft}
             onChange={(event) => setLabelDraft(event.target.value)}
           />
-          <button onClick={previewLabel} disabled={busy || !labelDraft.trim()}>
+          <button
+            onClick={() => previewPending("set-label", { iri: entity.iri, label: labelDraft.trim() })}
+            disabled={busy || !labelDraft.trim()}
+          >
             Preview
           </button>
         </div>
-        {preview && (
-          <div className="preview">
-            <div className="preview-head">set-label · {preview.summary.length} changes</div>
-            <ul className="why-list">
-              {preview.changes.map((change) => (
-                <li key={change} className="axiom">
-                  {change}
-                </li>
-              ))}
-            </ul>
-            <div className="row-actions">
-              <button onClick={commitLabel}>Commit</button>
-              <button onClick={() => setPreview(null)}>Cancel</button>
-            </div>
-          </div>
-        )}
         {audit.length > 0 && (
           <div className="audit">
             <h4>Recent actions</h4>
@@ -336,6 +392,58 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
   );
 }
 
+function EntityPicker({
+  placeholder,
+  onPick,
+}: {
+  placeholder: string;
+  onPick: (iri: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<SearchResult[]>([]);
+
+  const search = useCallback(async (value: string) => {
+    setQuery(value);
+    if (value.trim().length < 2) {
+      setResults([]);
+      return;
+    }
+    try {
+      setResults(
+        (await api.search(value)).results.filter((result) => result.kind === "class").slice(0, 8),
+      );
+    } catch {
+      setResults([]);
+    }
+  }, []);
+
+  return (
+    <div className="add-super">
+      <input
+        placeholder={placeholder}
+        value={query}
+        onChange={(event) => search(event.target.value)}
+      />
+      {results.length > 0 && (
+        <div className="suggestions">
+          {results.map((result) => (
+            <button
+              key={result.iri}
+              onClick={() => {
+                onPick(result.iri);
+                setQuery("");
+                setResults([]);
+              }}
+            >
+              {result.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="block">
@@ -354,8 +462,8 @@ function RefsSection({
   items: Ref[];
   onSelect: (iri: string) => void;
 }) {
-  return (
-    <Section title={title}>
+  const body = (
+    <>
       {items.length === 0 && <div className="muted">None</div>}
       {items.map((item) =>
         item.iri ? (
@@ -368,8 +476,9 @@ function RefsSection({
           </div>
         ),
       )}
-    </Section>
+    </>
   );
+  return title ? <Section title={title}>{body}</Section> : body;
 }
 
 function RefRow({
