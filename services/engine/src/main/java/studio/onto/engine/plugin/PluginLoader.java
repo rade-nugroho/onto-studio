@@ -18,9 +18,29 @@ public final class PluginLoader {
     private PluginLoader() {
     }
 
+    /**
+     * Reads a provider at a time so one broken plugin (wrong bytecode version,
+     * missing dependency) is skipped instead of stopping the engine.
+     */
+    private static void addAll(ServiceLoader<Plugin> loader, List<Plugin> plugins) {
+        java.util.Iterator<Plugin> iterator = loader.iterator();
+        for (int guard = 0; guard < 100; guard++) {
+            try {
+                if (!iterator.hasNext()) {
+                    return;
+                }
+                plugins.add(iterator.next());
+            } catch (java.util.ServiceConfigurationError error) {
+                return;
+            } catch (Exception error) {
+                return;
+            }
+        }
+    }
+
     public static List<Plugin> load() {
         List<Plugin> plugins = new ArrayList<>();
-        ServiceLoader.load(Plugin.class).forEach(plugins::add);
+        addAll(ServiceLoader.load(Plugin.class), plugins);
 
         Path dir = Path.of(System.getProperty("user.home", "."), ".onto-studio", "plugins");
         if (!Files.isDirectory(dir)) {
@@ -31,7 +51,7 @@ public final class PluginLoader {
                 try {
                     URLClassLoader loader = new URLClassLoader(
                             new URL[]{jar.toUri().toURL()}, Plugin.class.getClassLoader());
-                    ServiceLoader.load(Plugin.class, loader).forEach(plugins::add);
+                    addAll(ServiceLoader.load(Plugin.class, loader), plugins);
                 } catch (Exception ignored) {
                     // A broken plugin must not stop the engine from starting.
                 }

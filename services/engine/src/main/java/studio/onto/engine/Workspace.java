@@ -966,7 +966,9 @@ public final class Workspace implements Plugin.PluginContext {
                 changes.add(change.add()
                         ? new AddAxiom(ontology, change.axiom())
                         : new RemoveAxiom(ontology, change.axiom()));
-                summary.add((change.add() ? "add: " : "remove: ") + renderer.render(change.axiom()));
+                String rendered = renderer.render(change.axiom());
+                summary.add((change.add() ? "add: " : "remove: ")
+                        + (rendered == null || rendered.isBlank() ? change.axiom() : rendered));
             }
             return new Plan(name, changes, summary,
                     entity == null ? List.of() : List.of(entity.getIRI().toString()), params);

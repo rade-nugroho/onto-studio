@@ -7,7 +7,7 @@ Adds an action `sample:deprecate` that marks an entity with `owl:deprecated`.
 ```bash
 cd examples/plugin-sample
 ENGINE=../../services/engine/target/engine.jar
-javac -cp "$ENGINE" -d out $(find src -name '*.java')
+"$(/usr/libexec/java_home -v 21)/bin/javac" --release 21 -cp "$ENGINE" -d out $(find src -name '*.java')
 cp -R META-INF out/
 jar cf sample-plugin.jar -C out .
 mkdir -p ~/.onto-studio/plugins
