@@ -28,6 +28,13 @@ The script builds the engine jar, starts Vite, then runs the Tauri shell.
 The shell spawns `services/engine/target/engine.jar` on an ephemeral port and
 passes the port and session token to the UI through the `engine_info` command.
 
+## Evidence
+
+Every edit is recorded in `.onto-studio/evidence.jsonl` next to the ontology:
+timestamp, action (add/remove/import), source (manual/undo/redo/file), author
+(`ONTO_STUDIO_AUTHOR` or the OS user), axiom text, entities, and confidence.
+Click an axiom in the UI to see its evidence inline.
+
 ## Assistant configuration
 
 The assistant reads credentials from, in order: the process environment, a
@@ -68,6 +75,8 @@ curl -H "X-Engine-Token: dev" "http://127.0.0.1:7717/graph?depth=2"
 | `GET /entity?iri=` | Label, annotations, and axioms of a class |
 | `GET /search?q=` | Search classes, properties, and individuals |
 | `GET /graph?depth=` | Class hierarchy slice as nodes and edges |
+| `GET /evidence?iri=` | Where an entity's axioms came from (add/remove/import rows) |
+| `GET /why?iri=&axiom=` | Asserts or infers one axiom and returns its evidence or support |
 | `POST /axiom/subclass` | Add a `SubClassOf` axiom |
 | `POST /axiom/subclass/remove` | Remove a `SubClassOf` axiom |
 | `POST /ontology/save` | Save to the opened file or a new path |

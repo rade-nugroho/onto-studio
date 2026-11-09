@@ -30,6 +30,23 @@ export type EntityInfo = {
   axioms: string[];
 };
 
+export type EvidenceRow = {
+  ts: string;
+  action: string;
+  source: string;
+  author: string;
+  axiom: string;
+  confidence: number;
+};
+
+export type WhyResult = {
+  axiom: string;
+  status: "asserted" | "inferred";
+  evidence: EvidenceRow[];
+  supporting?: string[];
+  note?: string;
+};
+
 export type EditState = {
   dirty: boolean;
   canUndo: boolean;
@@ -145,6 +162,14 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ question, entityIri: entityIri ?? null }),
     }),
+  evidence: (iri: string) =>
+    call<{ rows: EvidenceRow[]; import: EvidenceRow | null }>(
+      `/evidence?iri=${encodeURIComponent(iri)}`,
+    ),
+  why: (iri: string, axiom: string) =>
+    call<WhyResult>(
+      `/why?iri=${encodeURIComponent(iri)}&axiom=${encodeURIComponent(axiom)}`,
+    ),
   undo: () => call<EditState>("/undo", { method: "POST" }),
   redo: () => call<EditState>("/redo", { method: "POST" }),
   history: () => call<EditState>("/history"),

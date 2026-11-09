@@ -57,6 +57,7 @@ public final class Workspace {
     private final Deque<List<OWLOntologyChange>> redoStack = new ArrayDeque<>();
 
     private OWLOntology ontology;
+    private EvidenceStore evidence;
     private OWLReasoner reasoner;
     private File openedFile;
     private int savedDepth;
@@ -81,6 +82,10 @@ public final class Workspace {
         }
         stopReasonerInternal();
         openedFile = file;
+        evidence = new EvidenceStore(EvidenceStore.defaultPath(file.toPath()));
+        evidence.record("import", "file", "", List.of(), 0.9, Map.of(
+                "file", file.getAbsolutePath(),
+                "count", ontology.getAxiomCount()));
         undoStack.clear();
         redoStack.clear();
         savedDepth = 0;
@@ -92,6 +97,10 @@ public final class Workspace {
                 "dirty", false,
                 "canUndo", false,
                 "canRedo", false));
+    }
+
+    public synchronized String currentPath() {
+        return openedFile == null ? null : openedFile.getAbsolutePath();
     }
 
     public synchronized void hierarchy(String parentIri, boolean inferred, Context ctx) {
@@ -402,7 +411,9 @@ public final class Workspace {
             return;
         }
         List<OWLOntologyChange> changes = undoStack.pop();
-        manager.applyChanges(inverse(changes));
+        List<OWLOntologyChange> inverseChanges = inverse(changes);
+        manager.applyChanges(inverseChanges);
+        recordEvidence(inverseChanges, "undo");
         redoStack.push(changes);
         ctx.json(state());
     }
@@ -417,6 +428,7 @@ public final class Workspace {
         }
         List<OWLOntologyChange> changes = redoStack.pop();
         manager.applyChanges(changes);
+        recordEvidence(changes, "redo");
         undoStack.push(changes);
         ctx.json(state());
     }
@@ -488,12 +500,97 @@ public final class Workspace {
     }
 
     private void apply(List<OWLOntologyChange> changes) {
+        apply(changes, "manual");
+    }
+
+    private void apply(List<OWLOntologyChange> changes, String source) {
         manager.applyChanges(changes);
+        recordEvidence(changes, source);
         if (reasoner != null) {
             reasoner.flush();
         }
         undoStack.push(List.copyOf(changes));
         redoStack.clear();
+    }
+
+    private void recordEvidence(List<OWLOntologyChange> changes, String source) {
+        if (evidence == null) {
+            return;
+        }
+        for (OWLOntologyChange change : changes) {
+            if (change instanceof AddAxiom add) {
+                evidence.record("add", source, renderer.render(add.getAxiom()), entitiesOf(add.getAxiom()), 1.0, null);
+            } else if (change instanceof RemoveAxiom remove) {
+                evidence.record("remove", source, renderer.render(remove.getAxiom()), entitiesOf(remove.getAxiom()), 1.0, null);
+            }
+        }
+    }
+
+    private static List<String> entitiesOf(OWLAxiom axiom) {
+        return axiom.signature().map(entity -> entity.getIRI().toString()).toList();
+    }
+
+    /** Evidence rows for one entity, newest first. */
+    public synchronized void evidence(String iri, Context ctx) {
+        if (!requireOntology(ctx)) {
+            return;
+        }
+        if (iri == null || iri.isBlank()) {
+            ctx.status(400).json(Map.of("error", "Missing iri"));
+            return;
+        }
+        List<Map<String, Object>> rows = evidence == null ? List.of() : evidence.forEntity(iri);
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("rows", rows);
+        response.put("import", evidence == null ? null : evidence.lastImport());
+        ctx.json(response);
+    }
+
+    /**
+     * Explains one axiom: whether it is asserted or inferred, and the evidence
+     * or supporting assertions behind it.
+     */
+    public synchronized void why(String iri, String axiomText, Context ctx) {
+        if (!requireOntology(ctx)) {
+            return;
+        }
+        if (iri == null || iri.isBlank() || axiomText == null || axiomText.isBlank()) {
+            ctx.status(400).json(Map.of("error", "Missing iri or axiom"));
+            return;
+        }
+        OWLEntity entity = ontology.signature()
+                .filter(candidate -> candidate.getIRI().toString().equals(iri))
+                .findFirst()
+                .orElse(null);
+        if (entity == null) {
+            ctx.status(404).json(Map.of("error", "Entity not found: " + iri));
+            return;
+        }
+        OWLAxiom match = ontology.getReferencingAxioms(entity).stream()
+                .filter(axiom -> renderer.render(axiom).equals(axiomText))
+                .findFirst()
+                .orElse(null);
+
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("axiom", axiomText);
+        if (match != null && ontology.containsAxiom(match)) {
+            response.put("status", "asserted");
+            response.put("evidence", evidence == null ? List.of() : evidence.forAxiom(axiomText));
+        } else {
+            response.put("status", "inferred");
+            response.put("evidence", List.of());
+            response.put("supporting", ontology.getReferencingAxioms(entity).stream()
+                    .filter(axiom -> !axiom.isAnnotationAxiom())
+                    .map(renderer::render)
+                    .filter(rendered -> !rendered.isBlank() && !rendered.equals(axiomText))
+                    .sorted()
+                    .limit(15)
+                    .toList());
+            response.put("note", reasoner == null
+                    ? "Not asserted. Start the reasoner to confirm entailment."
+                    : "Entailed by the structural reasoner from the supporting assertions.");
+        }
+        ctx.json(response);
     }
 
     private static List<OWLOntologyChange> inverse(List<OWLOntologyChange> changes) {

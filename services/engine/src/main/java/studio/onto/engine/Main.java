@@ -21,8 +21,10 @@ public final class Main {
                 : Long.toHexString(new java.security.SecureRandom().nextLong());
 
         Workspace workspace = new Workspace();
-        Javalin app = createApp(workspace, token);
+        Assistant assistant = new Assistant(workspace);
+        Javalin app = createApp(workspace, token, assistant);
         app.start("127.0.0.1", port);
+        assistant.setEndpoint("http://127.0.0.1:" + app.port(), token);
         if (java.util.Arrays.asList(args).contains("--watch-parent")) {
             watchParent();
         }
@@ -34,6 +36,10 @@ public final class Main {
     }
 
     static Javalin createApp(Workspace workspace, String token) {
+        return createApp(workspace, token, new Assistant(workspace));
+    }
+
+    static Javalin createApp(Workspace workspace, String token, Assistant assistant) {
         Javalin app = Javalin.create(config -> {
             config.showJavalinBanner = false;
             config.jsonMapper(new JavalinJackson());
@@ -71,7 +77,9 @@ public final class Main {
         app.post("/undo", workspace::undo);
         app.post("/redo", workspace::redo);
         app.get("/history", workspace::history);
-        Assistant assistant = new Assistant(workspace);
+        app.get("/evidence", ctx -> workspace.evidence(ctx.queryParam("iri"), ctx));
+        app.get("/why", ctx -> workspace.why(
+                ctx.queryParam("iri"), ctx.queryParam("axiom"), ctx));
         app.post("/assistant", ctx -> {
             AssistantRequest request = ctx.bodyAsClass(AssistantRequest.class);
             assistant.answer(request.question(), request.entityIri(), ctx);

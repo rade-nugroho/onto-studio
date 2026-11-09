@@ -1,5 +1,5 @@
-import { useCallback, useState } from "react";
-import { api, type EditState, type EntityInfo, type Ref, type SearchResult } from "./api";
+import { Fragment, useCallback, useState } from "react";
+import { api, type EditState, type EntityInfo, type Ref, type SearchResult, type WhyResult } from "./api";
 
 type EntityPanelProps = {
   entity: EntityInfo;
@@ -13,6 +13,7 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
   const [suggestions, setSuggestions] = useState<SearchResult[]>([]);
   const [axiomText, setAxiomText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [why, setWhy] = useState<WhyResult | null>(null);
 
   const run = useCallback(
     async (action: () => Promise<EditState>) => {
@@ -50,6 +51,21 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
       setSuggestions([]);
     }
   }, []);
+
+  const explain = useCallback(
+    async (axiom: string) => {
+      if (why?.axiom === axiom) {
+        setWhy(null);
+        return;
+      }
+      try {
+        setWhy(await api.why(entity.iri, axiom));
+      } catch (error) {
+        onError((error as Error).message);
+      }
+    },
+    [entity.iri, onError, why?.axiom],
+  );
 
   const addAxiom = useCallback(async () => {
     const text = axiomText.trim();
@@ -124,8 +140,11 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
 
       <Section title="Axioms">
         {entity.axioms.map((line) => (
-          <div key={line} className="line axiom-row">
-            <span className="axiom">{line}</span>
+          <Fragment key={line}>
+          <div className="line axiom-row">
+            <button className="axiom axiom-link" onClick={() => explain(line)}>
+              {line}
+            </button>
             <button
               className="remove"
               disabled={busy}
@@ -134,6 +153,41 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
               ×
             </button>
           </div>
+            {why?.axiom === line && (
+              <div className="why">
+                <div className="why-head">
+                  <span className={`badge ${why.status}`}>{why.status}</span>
+                  <span className="muted">
+                    {why.status === "asserted"
+                      ? "recorded evidence"
+                      : why.note ?? "entailed by the reasoner"}
+                  </span>
+                </div>
+                {why.status === "asserted" && why.evidence.length > 0 && (
+                  <ul className="why-list">
+                    {why.evidence.map((row) => (
+                      <li key={row.ts}>
+                        <strong>{row.action}</strong> by {row.author} · {row.source} ·{" "}
+                        {new Date(row.ts).toLocaleString()} · confidence {row.confidence}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {why.status === "asserted" && why.evidence.length === 0 && (
+                  <p className="muted">Imported from the ontology file; no edit recorded.</p>
+                )}
+                {why.status === "inferred" && (
+                  <ul className="why-list">
+                    {(why.supporting ?? []).map((support) => (
+                      <li key={support} className="axiom">
+                        {support}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </Fragment>
         ))}
       </Section>
 

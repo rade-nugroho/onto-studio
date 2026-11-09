@@ -137,6 +137,26 @@ class EngineApiTest {
     }
 
     @Test
+    void recordsEvidenceAndExplainsAxioms(@TempDir Path tempDir) throws Exception {
+        Path copy = tempDir.resolve("pizza.owl");
+        Files.copy(Path.of(PIZZA), copy);
+        JavalinTest.test(Main.createApp(new Workspace(), "test"), (server, client) -> {
+            body(client.post("/ontology/open", "{\"path\":\"" + copy + "\"}", HEADERS));
+            body(client.post("/axiom/subclass",
+                    "{\"sub\":\"" + NS + "Margherita\",\"sup\":\"" + NS + "Pizza\"}", HEADERS));
+
+            String evidence = body(client.get("/evidence?iri=" + encoded("Margherita"), HEADERS));
+            assertTrue(evidence.contains("\"source\":\"manual\""), evidence);
+            assertTrue(evidence.contains("\"author\""), evidence);
+
+            String why = body(client.get("/why?iri=" + encoded("Margherita")
+                    + "&axiom=" + URLEncoder.encode("Margherita ⊑ Pizza", StandardCharsets.UTF_8), HEADERS));
+            assertTrue(why.contains("\"status\":\"asserted\""), why);
+            assertTrue(why.contains("\"action\":\"add\""), why);
+        });
+    }
+
+    @Test
     void assistantNeedsApiKey() {
         System.setProperty("studio.onto.disableEnvFile", "true");
         try {
