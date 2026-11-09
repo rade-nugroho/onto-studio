@@ -17,7 +17,7 @@ rm -rf "$RESOURCES"
 mkdir -p "$RESOURCES"
 cp "$ROOT/services/engine/target/engine.jar" "$RESOURCES/engine.jar"
 "$JAVA_HOME/bin/jlink" \
-  --add-modules java.base,java.logging,java.naming,java.management,java.security.jgss,java.sql,java.xml,jdk.unsupported,jdk.crypto.ec \
+  --add-modules java.base,java.logging,java.naming,java.management,java.security.jgss,java.sql,java.xml,java.net.http,java.desktop,java.xml.crypto,jdk.unsupported,jdk.crypto.ec \
   --strip-debug --no-header-files --no-man-pages --compress=zip-6 \
   --output "$RESOURCES/jre"
 

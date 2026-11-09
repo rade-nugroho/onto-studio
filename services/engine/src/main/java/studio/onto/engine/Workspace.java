@@ -1407,8 +1407,12 @@ public final class Workspace implements Plugin.PluginContext {
     }
 
     private boolean isTopLevel(OWLClass cls) {
+        // Classes whose only named parent is owl:Thing are shown at the root so
+        // the tree does not start with a single "Thing" node.
         return EntitySearcher.getSuperClasses(cls, ontology)
-                .noneMatch(OWLClassExpression::isNamed);
+                .filter(OWLClassExpression::isNamed)
+                .map(OWLClassExpression::asOWLClass)
+                .allMatch(OWLClass::isOWLThing);
     }
 
     private boolean hasChildren(OWLClass cls) {

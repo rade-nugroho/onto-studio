@@ -59,6 +59,8 @@ public final class Assistant {
             3. Derive classes, object properties, data properties, and relationships only from the document.
             4. Write Manchester frames and apply them in one ontology_apply_batch call.
                Give every root class SubClassOf: Thing so the class is created.
+               Every class and property must carry Annotations: rdfs:label and
+               Annotations: rdfs:comment; the comment explains the concept in one sentence.
             5. Call ontology_save so the generated file is written to disk.
             6. Summarize the model, list assumptions, and flag gaps or ambiguous requirements.
 
