@@ -530,6 +530,131 @@ public final class Workspace {
         return axiom.signature().map(entity -> entity.getIRI().toString()).toList();
     }
 
+    /**
+     * Plans a declared action without touching the ontology. The caller shows
+     * the summary to the user, who then commits or discards it.
+     */
+    public synchronized void previewAction(Main.ActionRequest request, Context ctx) {
+        if (!requireOntology(ctx)) {
+            return;
+        }
+        Plan plan;
+        try {
+            plan = plan(request);
+        } catch (IllegalArgumentException error) {
+            ctx.status(400).json(Map.of("error", error.getMessage()));
+            return;
+        }
+        ctx.json(Map.of(
+                "action", plan.name,
+                "summary", plan.summary,
+                "changes", plan.changes.stream().map(Workspace::describe).toList()));
+    }
+
+    public synchronized void commitAction(Main.ActionRequest request, Context ctx) {
+        if (!requireOntology(ctx)) {
+            return;
+        }
+        Plan plan;
+        try {
+            plan = plan(request);
+        } catch (IllegalArgumentException error) {
+            ctx.status(400).json(Map.of("error", error.getMessage()));
+            return;
+        }
+        apply(plan.changes, "action:" + plan.name);
+        evidence.record("action", "action:" + plan.name, "", plan.entities, 1.0, Map.of(
+                "actionName", plan.name,
+                "reason", request.reason() == null ? "" : request.reason(),
+                "changes", plan.summary,
+                "params", plan.params));
+        Map<String, Object> response = new LinkedHashMap<>(state());
+        response.put("action", plan.name);
+        response.put("summary", plan.summary);
+        ctx.json(response);
+    }
+
+    public synchronized void audit(Context ctx) {
+        ctx.json(Map.of("rows", evidence == null ? List.of() : evidence.recentActions(50)));
+    }
+
+    private record Plan(String name, List<OWLOntologyChange> changes, List<String> summary,
+                        List<String> entities, Map<String, String> params) {
+    }
+
+    private Plan plan(Main.ActionRequest request) {
+        String name = request.action() == null ? "" : request.action();
+        Map<String, String> params = request.params() == null ? Map.of() : request.params();
+        OWLEntity entity = entity(params.get("iri"));
+        List<OWLOntologyChange> changes = new ArrayList<>();
+        List<String> summary = new ArrayList<>();
+
+        switch (name) {
+            case "set-label" -> {
+                require(entity, "iri");
+                String label = params.get("label");
+                if (label == null || label.isBlank()) {
+                    throw new IllegalArgumentException("Missing label");
+                }
+                List<OWLAnnotation> existing = EntitySearcher
+                        .getAnnotations(entity, ontology, dataFactory.getRDFSLabel()).toList();
+                for (OWLAnnotation annotation : existing) {
+                    changes.add(new RemoveAxiom(ontology, dataFactory.getOWLAnnotationAssertionAxiom(
+                            annotation.getProperty(), entity.getIRI(), annotation.getValue())));
+                    summary.add("remove label: " + annotation.getValue());
+                }
+                changes.add(new AddAxiom(ontology, dataFactory.getOWLAnnotationAssertionAxiom(
+                        dataFactory.getRDFSLabel(), entity.getIRI(), dataFactory.getOWLLiteral(label))));
+                summary.add("add label: " + label);
+            }
+            case "add-subclass" -> {
+                require(entity, "iri");
+                OWLEntity parent = entity(params.get("parent"));
+                require(parent, "parent");
+                OWLClass child = entity.asOWLClass();
+                OWLClass sup = parent.asOWLClass();
+                changes.add(new AddAxiom(ontology, dataFactory.getOWLSubClassOfAxiom(child, sup)));
+                summary.add("add: " + label(child) + " sub " + label(sup));
+            }
+            case "remove-subclass" -> {
+                require(entity, "iri");
+                OWLEntity parent = entity(params.get("parent"));
+                require(parent, "parent");
+                OWLClass child = entity.asOWLClass();
+                OWLClass sup = parent.asOWLClass();
+                changes.add(new RemoveAxiom(ontology, dataFactory.getOWLSubClassOfAxiom(child, sup)));
+                summary.add("remove: " + label(child) + " sub " + label(sup));
+            }
+            default -> throw new IllegalArgumentException("Unknown action: " + name);
+        }
+
+        List<String> entities = entity == null
+                ? List.of()
+                : List.of(entity.getIRI().toString());
+        return new Plan(name, changes, summary, entities, params);
+    }
+
+    private OWLEntity entity(String iri) {
+        if (iri == null || iri.isBlank()) {
+            return null;
+        }
+        return ontology.signature()
+                .filter(candidate -> candidate.getIRI().toString().equals(iri))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private static void require(OWLEntity entity, String param) {
+        if (entity == null) {
+            throw new IllegalArgumentException("Unknown entity for " + param);
+        }
+    }
+
+    private static String describe(OWLOntologyChange change) {
+        String kind = change instanceof AddAxiom ? "+" : "-";
+        return kind + " " + change.getAxiom();
+    }
+
     /** Evidence rows for one entity, newest first. */
     public synchronized void evidence(String iri, Context ctx) {
         if (!requireOntology(ctx)) {

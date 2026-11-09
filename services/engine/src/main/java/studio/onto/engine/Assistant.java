@@ -3,6 +3,7 @@ package studio.onto.engine;
 import com.anthropic.client.AnthropicClient;
 import com.anthropic.client.okhttp.AnthropicOkHttpClient;
 import com.anthropic.core.JsonValue;
+import com.anthropic.models.beta.AnthropicBeta;
 import com.anthropic.models.beta.agents.AgentCreateParams;
 import com.anthropic.models.beta.agents.BetaManagedAgentsCustomToolInputSchema;
 import com.anthropic.models.beta.agents.BetaManagedAgentsCustomToolParams;
@@ -12,10 +13,11 @@ import com.anthropic.models.beta.environments.BetaLimitedNetworkParams;
 import com.anthropic.models.beta.environments.EnvironmentCreateParams;
 import com.anthropic.models.beta.sessions.SessionCreateParams;
 import com.anthropic.models.beta.sessions.events.BetaManagedAgentsAgentCustomToolUseEvent;
-import com.anthropic.models.beta.sessions.events.BetaManagedAgentsSessionEvent;
+import com.anthropic.models.beta.sessions.events.BetaManagedAgentsStreamSessionEvents;
 import com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserCustomToolResultEventParams;
 import com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserMessageEventParams;
 import com.anthropic.models.beta.sessions.events.EventSendParams;
+import com.anthropic.models.beta.sessions.events.EventStreamParams;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.javalin.http.Context;
@@ -55,6 +57,7 @@ public final class Assistant {
             """;
 
     private static final int MAX_TOOL_OUTPUT = 20_000;
+    private static final AnthropicBeta BETA = AnthropicBeta.MANAGED_AGENTS_2026_04_01;
     private static final Duration TOOL_TIMEOUT = Duration.ofSeconds(30);
     private static final Duration SESSION_BUDGET = Duration.ofMinutes(2);
 
@@ -115,15 +118,17 @@ public final class Assistant {
         String prompt = "Ontology context:\n" + context + "\n\nQuestion: " + question;
         StringBuilder answer = new StringBuilder();
 
-        try (var stream = client.beta().sessions().events().streamStreaming(sessionId)) {
+        try (var stream = client.beta().sessions().events().streamStreaming(
+                sessionId, EventStreamParams.builder().addBeta(BETA).build())) {
             client.beta().sessions().events().send(sessionId, EventSendParams.builder()
+                    .addBeta(BETA)
                     .addEvent(BetaManagedAgentsUserMessageEventParams.builder()
                             .addTextContent(prompt)
                             .build())
                     .build());
 
             long deadline = System.nanoTime() + SESSION_BUDGET.toNanos();
-            for (BetaManagedAgentsSessionEvent event : stream) {
+            for (BetaManagedAgentsStreamSessionEvents event : stream) {
                 if (System.nanoTime() > deadline) {
                     throw new IllegalStateException("Assistant timed out");
                 }
@@ -134,6 +139,7 @@ public final class Assistant {
                         var use = event.asAgentCustomToolUse();
                         String result = runTool(use.name(), use.input());
                         client.beta().sessions().events().send(sessionId, EventSendParams.builder()
+                                .addBeta(BETA)
                                 .addEvent(BetaManagedAgentsUserCustomToolResultEventParams.builder()
                                         .customToolUseId(use.id())
                                         .addTextContent(result)
@@ -161,6 +167,7 @@ public final class Assistant {
         }
         if (environmentId == null) {
             var environment = client.beta().environments().create(EnvironmentCreateParams.builder()
+                    .addBeta(BETA)
                     .name("onto-studio")
                     .config(BetaCloudConfigParams.builder()
                             .networking(BetaLimitedNetworkParams.builder()
@@ -172,6 +179,7 @@ public final class Assistant {
         }
         if (agentId == null) {
             AgentCreateParams.Builder builder = AgentCreateParams.builder()
+                    .addBeta(BETA)
                     .name("Onto Studio Assistant")
                     .description("Ontology assistant for Onto Studio. Inspects and edits the open OWL ontology.")
                     .model(BetaManagedAgentsModel.CLAUDE_SONNET_5)
@@ -187,6 +195,7 @@ public final class Assistant {
             return;
         }
         var session = client.beta().sessions().create(SessionCreateParams.builder()
+                .addBeta(BETA)
                 .agent(agentId)
                 .environmentId(environmentId)
                 .build());

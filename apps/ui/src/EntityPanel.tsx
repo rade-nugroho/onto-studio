@@ -1,5 +1,14 @@
-import { Fragment, useCallback, useState } from "react";
-import { api, type EditState, type EntityInfo, type Ref, type SearchResult, type WhyResult } from "./api";
+import { Fragment, useCallback, useEffect, useState } from "react";
+import {
+  api,
+  type ActionPreview,
+  type AuditRow,
+  type EditState,
+  type EntityInfo,
+  type Ref,
+  type SearchResult,
+  type WhyResult,
+} from "./api";
 
 type EntityPanelProps = {
   entity: EntityInfo;
@@ -14,6 +23,9 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
   const [axiomText, setAxiomText] = useState("");
   const [busy, setBusy] = useState(false);
   const [why, setWhy] = useState<WhyResult | null>(null);
+  const [labelDraft, setLabelDraft] = useState("");
+  const [preview, setPreview] = useState<ActionPreview | null>(null);
+  const [audit, setAudit] = useState<AuditRow[]>([]);
 
   const run = useCallback(
     async (action: () => Promise<EditState>) => {
@@ -66,6 +78,50 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
     },
     [entity.iri, onError, why?.axiom],
   );
+
+  useEffect(() => {
+    api
+      .audit()
+      .then((result) =>
+        setAudit(result.rows.filter((row) => row.entities.includes(entity.iri)).slice(0, 5)),
+      )
+      .catch(() => setAudit([]));
+  }, [entity.iri]);
+
+  const previewLabel = useCallback(async () => {
+    if (!labelDraft.trim()) {
+      return;
+    }
+    try {
+      setPreview(
+        await api.previewAction("set-label", { iri: entity.iri, label: labelDraft.trim() }),
+      );
+    } catch (error) {
+      onError((error as Error).message);
+    }
+  }, [entity.iri, labelDraft, onError]);
+
+  const commitLabel = useCallback(async () => {
+    if (!preview) {
+      return;
+    }
+    try {
+      const result = await api.commitAction("set-label", {
+        iri: entity.iri,
+        label: labelDraft.trim(),
+      });
+      onEdited(result);
+      setPreview(null);
+      setLabelDraft("");
+      setAudit(
+        (await api.audit()).rows
+          .filter((row) => row.entities.includes(entity.iri))
+          .slice(0, 5),
+      );
+    } catch (error) {
+      onError((error as Error).message);
+    }
+  }, [entity.iri, labelDraft, onEdited, onError, preview]);
 
   const addAxiom = useCallback(async () => {
     const text = axiomText.trim();
@@ -189,6 +245,49 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
             )}
           </Fragment>
         ))}
+      </Section>
+
+      <Section title="Actions">
+        <div className="action-row">
+          <input
+            placeholder="New label…"
+            value={labelDraft}
+            onChange={(event) => setLabelDraft(event.target.value)}
+          />
+          <button onClick={previewLabel} disabled={busy || !labelDraft.trim()}>
+            Preview
+          </button>
+        </div>
+        {preview && (
+          <div className="preview">
+            <div className="preview-head">set-label · {preview.summary.length} changes</div>
+            <ul className="why-list">
+              {preview.changes.map((change) => (
+                <li key={change} className="axiom">
+                  {change}
+                </li>
+              ))}
+            </ul>
+            <div className="row-actions">
+              <button onClick={commitLabel}>Commit</button>
+              <button onClick={() => setPreview(null)}>Cancel</button>
+            </div>
+          </div>
+        )}
+        {audit.length > 0 && (
+          <div className="audit">
+            <h4>Recent actions</h4>
+            <ul className="why-list">
+              {audit.map((row) => (
+                <li key={row.ts}>
+                  <strong>{row.actionName ?? "action"}</strong> ·{" "}
+                  {new Date(row.ts).toLocaleString()} · {row.author}
+                  {row.reason ? ` · “${row.reason}”` : ""}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </Section>
 
       <Section title="Add axiom">

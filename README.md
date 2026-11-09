@@ -80,6 +80,7 @@ curl -H "X-Engine-Token: dev" "http://127.0.0.1:7717/graph?depth=2"
 | `POST /axiom/subclass` | Add a `SubClassOf` axiom |
 | `POST /axiom/subclass/remove` | Remove a `SubClassOf` axiom |
 | `POST /ontology/save` | Save to the opened file or a new path |
+| `POST /assistant` | Ask the ontology assistant (Claude Managed Agents) |
 
 All endpoints require the `X-Engine-Token` header.
 
@@ -94,7 +95,7 @@ All endpoints require the `X-Engine-Token` header.
 P0-P4 done: open, browse, search, graph, editing (superclass + free Manchester
 axioms, properties/individuals), undo/redo, structural reasoner, command
 palette (Cmd+K), keyboard shortcuts (Cmd+Z/S/1/2), assistant grounded in the
-ontology (Anthropic SDK, needs `ANTHROPIC_API_KEY`), and a packaged macOS app
+ontology (Claude Managed Agents with ontology tools, needs `ANTHROPIC_API_KEY`), and a packaged macOS app
 with a bundled Java runtime (`scripts/package.sh`).
 
 ## History

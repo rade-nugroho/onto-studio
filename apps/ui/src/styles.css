@@ -641,3 +641,39 @@ h2 .kind {
 .why-list li {
   margin-bottom: 4px;
 }
+
+.action-row {
+  display: flex;
+  gap: 8px;
+}
+
+.action-row input {
+  flex: 1;
+  height: 34px;
+  padding: 6px 12px;
+  border-radius: 9999px;
+  border: 1px solid var(--border);
+  font: inherit;
+}
+
+.preview {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px dashed var(--cyan);
+  border-radius: 12px;
+  background: var(--accent-soft);
+}
+
+.preview-head {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.audit h4 {
+  margin: 12px 0 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--muted);
+}

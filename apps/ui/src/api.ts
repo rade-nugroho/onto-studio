@@ -47,6 +47,19 @@ export type WhyResult = {
   note?: string;
 };
 
+export type ActionPreview = {
+  action: string;
+  summary: string[];
+  changes: string[];
+};
+
+export type AuditRow = EvidenceRow & {
+  entities: string[];
+  actionName?: string;
+  reason?: string;
+  changes?: string[];
+};
+
 export type EditState = {
   dirty: boolean;
   canUndo: boolean;
@@ -162,6 +175,21 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ question, entityIri: entityIri ?? null }),
     }),
+  previewAction: (action: string, params: Record<string, string>) =>
+    call<ActionPreview>("/action/preview", {
+      method: "POST",
+      body: JSON.stringify({ action, params }),
+    }),
+  commitAction: (
+    action: string,
+    params: Record<string, string>,
+    reason?: string,
+  ) =>
+    call<EditState & { action: string; summary: string[] }>("/action/commit", {
+      method: "POST",
+      body: JSON.stringify({ action, params, reason }),
+    }),
+  audit: () => call<{ rows: AuditRow[] }>("/audit"),
   evidence: (iri: string) =>
     call<{ rows: EvidenceRow[]; import: EvidenceRow | null }>(
       `/evidence?iri=${encodeURIComponent(iri)}`,

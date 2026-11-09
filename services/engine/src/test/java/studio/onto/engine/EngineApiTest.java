@@ -137,6 +137,36 @@ class EngineApiTest {
     }
 
     @Test
+    void actionsPreviewThenCommitWithAudit(@TempDir Path tempDir) throws Exception {
+        Path copy = tempDir.resolve("pizza.owl");
+        Files.copy(Path.of(PIZZA), copy);
+        JavalinTest.test(Main.createApp(new Workspace(), "test"), (server, client) -> {
+            body(client.post("/ontology/open", "{\"path\":\"" + copy + "\"}", HEADERS));
+
+            String preview = body(client.post("/action/preview",
+                    "{\"action\":\"set-label\",\"params\":{\"iri\":\"" + NS
+                            + "Margherita\",\"label\":\"Margherita Pizza\"}}", HEADERS));
+            assertTrue(preview.contains("remove label"), preview);
+
+            String before = body(client.get("/entity?iri=" + encoded("Margherita"), HEADERS));
+            assertTrue(before.contains("Margherita"), before);
+
+            String commit = body(client.post("/action/commit",
+                    "{\"action\":\"set-label\",\"params\":{\"iri\":\"" + NS
+                            + "Margherita\",\"label\":\"Margherita Pizza\"},\"reason\":\"rename for clarity\"}",
+                    HEADERS));
+            assertTrue(commit.contains("set-label"), commit);
+
+            String after = body(client.get("/entity?iri=" + encoded("Margherita"), HEADERS));
+            assertTrue(after.contains("Margherita Pizza"), after);
+
+            String audit = body(client.get("/audit", HEADERS));
+            assertTrue(audit.contains("rename for clarity"), audit);
+            assertTrue(audit.contains("\"actionName\":\"set-label\""), audit);
+        });
+    }
+
+    @Test
     void recordsEvidenceAndExplainsAxioms(@TempDir Path tempDir) throws Exception {
         Path copy = tempDir.resolve("pizza.owl");
         Files.copy(Path.of(PIZZA), copy);

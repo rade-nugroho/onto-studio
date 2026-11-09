@@ -75,6 +75,17 @@ public final class EvidenceStore {
         return matches;
     }
 
+    /** Recent action commits, newest first. */
+    public synchronized List<Map<String, Object>> recentActions(int limit) {
+        List<Map<String, Object>> matches = new ArrayList<>();
+        for (int i = rows.size() - 1; i >= 0 && matches.size() < limit; i--) {
+            if ("action".equals(rows.get(i).get("action"))) {
+                matches.add(rows.get(i));
+            }
+        }
+        return matches;
+    }
+
     /** The most recent import batch, which explains axioms nobody edited yet. */
     public synchronized Map<String, Object> lastImport() {
         for (int i = rows.size() - 1; i >= 0; i--) {

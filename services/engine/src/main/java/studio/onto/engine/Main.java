@@ -78,6 +78,9 @@ public final class Main {
         app.post("/redo", workspace::redo);
         app.get("/history", workspace::history);
         app.get("/evidence", ctx -> workspace.evidence(ctx.queryParam("iri"), ctx));
+        app.post("/action/preview", ctx -> workspace.previewAction(ctx.bodyAsClass(ActionRequest.class), ctx));
+        app.post("/action/commit", ctx -> workspace.commitAction(ctx.bodyAsClass(ActionRequest.class), ctx));
+        app.get("/audit", workspace::audit);
         app.get("/why", ctx -> workspace.why(
                 ctx.queryParam("iri"), ctx.queryParam("axiom"), ctx));
         app.post("/assistant", ctx -> {
@@ -111,6 +114,9 @@ public final class Main {
     }
 
     public record AssistantRequest(String question, String entityIri) {
+    }
+
+    public record ActionRequest(String action, Map<String, String> params, String reason) {
     }
 
     /**
