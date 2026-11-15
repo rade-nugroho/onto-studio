@@ -3,17 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import {
-  Activity01Icon,
-  BlocksIcon,
-  LifebuoyIcon,
-  DashboardSpeed01Icon,
-  DatabaseIcon,
   FlowConnectionIcon,
-  Key01Icon,
-  BoxesIcon,
-  Rocket01Icon,
-  ServerStack01Icon,
-  Shield01Icon,
+  LayoutTemplateIcon,
+  LifebuoyIcon,
+  Search01Icon,
+  SparklesIcon,
 } from "@hugeicons/core-free-icons";
 
 const cx = (...c: (string | false | null | undefined)[]) =>
@@ -29,7 +23,7 @@ const focusRing =
 const brandMark =
   "inline-flex shrink-0 items-center justify-center overflow-hidden rounded-[var(--rb-r-sm,6px)] bg-[var(--rb-accent,oklch(20.5%_0_0))] text-[var(--rb-accent-fg,oklch(100%_0_0))] select-none dark:bg-[var(--rb-accent,oklch(100%_0_0))] dark:text-[var(--rb-accent-fg,oklch(20.5%_0_0))]";
 const avatar =
-  "relative inline-flex size-8 shrink-0 overflow-hidden rounded-full select-none";
+  "relative inline-flex size-11 shrink-0 touch-manipulation overflow-hidden rounded-full select-none";
 const avatarFallback =
   "flex size-full items-center justify-center rounded-[inherit] border border-neutral-900/12 dark:border-neutral-100/14 bg-white dark:bg-neutral-900 text-[12px]/[16px] font-[450] tabular-nums text-neutral-900 dark:text-neutral-100";
 const menuPopup =
@@ -40,72 +34,21 @@ const menuLabel =
   "px-2 pt-2 pb-1 text-[12px]/[16px] font-normal tabular-nums text-neutral-900/66 dark:text-neutral-100/66";
 const sidebarSurface =
   "border-r border-neutral-900/8 bg-white dark:border-neutral-100/8 dark:bg-neutral-900";
-const navItem =
-  "flex h-8 w-full min-w-0 cursor-pointer items-center gap-2 rounded-[var(--rb-r-sm,6px)] px-2 text-left text-[14px]/[16px] font-[450] text-neutral-900/80 transition-[background-color,color] duration-[120ms] ease-[cubic-bezier(0.2,0,0,1)] [&_svg]:shrink-0 hover:bg-neutral-900/5 hover:text-neutral-900 aria-[current=page]:bg-neutral-900/9 aria-[current=page]:text-neutral-900 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--rb-accent,oklch(20.5%_0_0))] dark:focus-visible:outline-[var(--rb-accent,oklch(100%_0_0))] dark:text-neutral-100/80 dark:hover:bg-neutral-100/5 dark:hover:text-neutral-100 dark:aria-[current=page]:bg-neutral-100/9 dark:aria-[current=page]:text-neutral-100";
+const railButton =
+  "flex size-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-[var(--rb-r-sm,6px)] text-neutral-900/80 transition-[background-color,color] duration-[120ms] ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none [&_svg]:shrink-0 hover:bg-neutral-900/5 hover:text-neutral-900 aria-[current=page]:bg-neutral-900/9 aria-[current=page]:text-neutral-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--rb-accent,oklch(20.5%_0_0))] dark:focus-visible:outline-[var(--rb-accent,oklch(100%_0_0))] dark:text-neutral-100/80 dark:hover:bg-neutral-100/5 dark:hover:text-neutral-100 dark:aria-[current=page]:bg-neutral-100/9 dark:aria-[current=page]:text-neutral-100";
 
-export type RailItem = {
+export type RailDestination = {
   label: string;
   icon: IconSvgElement;
   current?: boolean;
-  children: string[];
+  title?: string;
 };
 
-const railGroups: RailItem[][] = [
-  [
-    {
-      label: "Overview",
-      icon: DashboardSpeed01Icon,
-      children: ["Today", "This week"],
-    },
-    {
-      label: "Automation",
-      icon: FlowConnectionIcon,
-      current: true,
-      children: ["Agent runs", "Playbooks", "Schedules"],
-    },
-    {
-      label: "Services",
-      icon: BoxesIcon,
-      children: ["Inventory", "Vendors", "Contracts"],
-    },
-    {
-      label: "Data",
-      icon: DatabaseIcon,
-      children: ["Warehouses", "Exports", "Retention"],
-    },
-    {
-      label: "Integrations",
-      icon: BlocksIcon,
-      children: ["Connected apps", "Webhooks", "API keys"],
-    },
-  ],
-  [
-    {
-      label: "Governance",
-      icon: Shield01Icon,
-      children: ["Access review", "Audit log", "Policies"],
-    },
-    {
-      label: "Monitoring",
-      icon: Activity01Icon,
-      children: ["Incidents", "Alerts", "Uptime"],
-    },
-    {
-      label: "Releases",
-      icon: Rocket01Icon,
-      children: ["Rollouts", "Changelog", "Flags"],
-    },
-    {
-      label: "Environments",
-      icon: ServerStack01Icon,
-      children: ["Production", "Staging", "Sandbox"],
-    },
-    {
-      label: "Credentials",
-      icon: Key01Icon,
-      children: ["Tokens", "Certificates", "Secrets"],
-    },
-  ],
+const defaultDestinations: RailDestination[] = [
+  { label: "Ontology", icon: LayoutTemplateIcon, current: true, title: "Ontology" },
+  { label: "Search", icon: Search01Icon, title: "Search hierarchy" },
+  { label: "Connectors", icon: FlowConnectionIcon, title: "Connectors" },
+  { label: "Assistant", icon: SparklesIcon, title: "Assistant" },
 ];
 
 function Flyout({
@@ -152,12 +95,12 @@ function Flyout({
 }
 
 export default function AppSidebar2({
-  groups,
-  onSelect,
-  brand = "A",
+  items = defaultDestinations,
+  onNavigate,
+  brand = "O",
 }: {
-  groups?: RailItem[][];
-  onSelect?: (label: string, item: string) => void;
+  items?: RailDestination[];
+  onNavigate?: (label: string) => void;
   brand?: string;
 } = {}) {
   const [openKey, setOpenKey] = useState<string | null>(null);
@@ -262,56 +205,29 @@ export default function AppSidebar2({
 
         <nav
           aria-label="Primary"
-          className="mt-4 flex flex-1 flex-col items-center gap-4"
+          className="mt-4 flex flex-1 flex-col items-center gap-1"
         >
-          {(groups ?? railGroups).map((group, groupIndex) => (
-            <ul
-              key={groupIndex}
-              className="flex w-full list-none flex-col items-center gap-1"
-              role="list"
-            >
-              {group.map((item) => {
-                const open = openKey === item.label;
-                return (
-                  <li
-                    key={item.label}
-                    className="relative w-full"
-                    onPointerEnter={(event) => hoverOpen(item.label, event)}
-                    onPointerLeave={(event) => hoverClose(item.label, event)}
-                  >
-                    <button
-                      ref={(node) => {
-                        triggerRefs.current[item.label] = node;
-                      }}
-                      type="button"
-                      aria-label={item.label}
-                      aria-current={item.current ? "page" : undefined}
-                      aria-haspopup="menu"
-                      aria-expanded={open}
-                      onClick={() => toggle(item.label)}
-                      className={cx(navItem, "justify-center")}
-                    >
-                      <HugeiconsIcon
-                        icon={item.icon}
-                        size={16}
-                        strokeWidth={1.8}
-                        aria-hidden="true"
-                      />
-                    </button>
-                    {open && (
-                      <Flyout
-                        menuRef={menuRef}
-                        label={item.label}
-                        items={item.children}
-                        align="top"
-                        onSelect={onSelect}
-                      />
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          ))}
+          <ul className="flex w-full list-none flex-col items-center gap-1" role="list">
+            {items.map((item) => (
+              <li key={item.label} className="flex w-full justify-center">
+                <button
+                  type="button"
+                  aria-label={item.label}
+                  title={item.title ?? item.label}
+                  aria-current={item.current ? "page" : undefined}
+                  onClick={() => onNavigate?.(item.label)}
+                  className={railButton}
+                >
+                  <HugeiconsIcon
+                    icon={item.icon}
+                    size={16}
+                    strokeWidth={1.8}
+                    aria-hidden="true"
+                  />
+                </button>
+              </li>
+            ))}
+          </ul>
         </nav>
 
         <div className="mt-4 flex w-full flex-col items-center gap-1">
@@ -338,10 +254,11 @@ export default function AppSidebar2({
                   }}
                   type="button"
                   aria-label={item.label}
+                  title={item.label}
                   aria-haspopup="menu"
                   aria-expanded={open}
                   onClick={() => toggle(item.label)}
-                  className={cx(navItem, "justify-center")}
+                  className={railButton}
                 >
                   <HugeiconsIcon
                     icon={item.icon}
@@ -373,6 +290,7 @@ export default function AppSidebar2({
               }}
               type="button"
               aria-label="Your account"
+              title="Your account"
               aria-haspopup="menu"
               aria-expanded={openKey === "Account"}
               onClick={() => toggle("Account")}

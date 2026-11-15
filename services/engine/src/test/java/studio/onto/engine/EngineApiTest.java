@@ -25,6 +25,12 @@ class EngineApiTest {
 
     private static final String NS = "http://example.invalid/ontologies/pizza/2005/10/18/pizza.owl#";
 
+    private static final String LANG = "http://protege.stanford.edu/plugins/owl/protege#defaultLanguage";
+
+    private static final String XSD_STRING = "http://www.w3.org/2001/XMLSchema#string";
+
+    private static final String XSD_INTEGER = "http://www.w3.org/2001/XMLSchema#integer";
+
     @Test
     void rejectsRequestsWithoutToken() {
         JavalinTest.test(Main.createApp(new Workspace(), "test"), (server, client) -> {
@@ -452,14 +458,23 @@ class EngineApiTest {
 
     @Test
     void assistantNeedsApiKey() {
+        String priorKey = System.getProperty(Assistant.API_KEY_PROPERTY);
+        String priorDisable = System.getProperty("studio.onto.disableEnvFile");
+        System.setProperty(Assistant.API_KEY_PROPERTY, "");
         System.setProperty("studio.onto.disableEnvFile", "true");
         try {
             JavalinTest.test(Main.createApp(new Workspace(), "test"), (server, client) -> {
                 open(client);
-                assertEquals(503, client.post("/assistant", "{\"question\":\"hi\"}", HEADERS).code());
+                try (okhttp3.Response response = client.post("/assistant", "{\"question\":\"hi\"}", HEADERS)) {
+                    assertEquals(503, response.code());
+                    String body = body(response);
+                    assertTrue(body.contains("OPENROUTER_API_KEY"), body);
+                    assertFalse(body.contains("ANTHROPIC"), body);
+                }
             });
         } finally {
-            System.clearProperty("studio.onto.disableEnvFile");
+            restoreProperty(Assistant.API_KEY_PROPERTY, priorKey);
+            restoreProperty("studio.onto.disableEnvFile", priorDisable);
         }
     }
 
@@ -587,6 +602,287 @@ class EngineApiTest {
         });
     }
 
+    @Test
+    void someValuesFromExpression(@TempDir Path tempDir) throws Exception {
+        withPizza(tempDir, client -> {
+            okhttp3.Response bad = client.post("/action/preview",
+                    subclassExpr("IceCream", "{\"kind\":\"nope\"}"), HEADERS);
+            String badBody = body(bad);
+            assertEquals(400, bad.code(), badBody);
+            assertTrue(badBody.contains("Unknown expression kind"), badBody);
+
+            assertStructuredAxiom(client, NS + "IceCream", "add-subclass-expression",
+                    subclassExpr("IceCream", restriction("some", NS + "hasTopping", classFiller(NS + "MeatTopping"))),
+                    "∃ hasTopping.MeatTopping");
+            assertStructuredAxiom(client, NS + "IceCream", "add-subclass-expression",
+                    subclassExpr("IceCream", restriction("some", LANG, datatypeFiller(XSD_STRING))),
+                    "∃ defaultLanguage.string");
+        });
+    }
+
+    @Test
+    void allValuesFromExpression(@TempDir Path tempDir) throws Exception {
+        withPizza(tempDir, client -> {
+            assertStructuredAxiom(client, NS + "IceCream", "add-subclass-expression",
+                    subclassExpr("IceCream", restriction("only", NS + "hasSpiciness", classFiller(NS + "Mild"))),
+                    "∀ hasSpiciness.Mild");
+            assertStructuredAxiom(client, NS + "IceCream", "add-subclass-expression",
+                    subclassExpr("IceCream", restriction("only", LANG, datatypeFiller(XSD_STRING))),
+                    "∀ defaultLanguage.string");
+        });
+    }
+
+    @Test
+    void minCardinalityExpression(@TempDir Path tempDir) throws Exception {
+        withPizza(tempDir, client -> {
+            assertStructuredAxiom(client, NS + "IceCream", "add-subclass-expression",
+                    subclassExpr("IceCream", cardinality("min", 2, NS + "hasTopping", classFiller(NS + "MeatTopping"))),
+                    "≥ 2 hasTopping.MeatTopping");
+            assertStructuredAxiom(client, NS + "IceCream", "add-subclass-expression",
+                    subclassExpr("IceCream", cardinality("min", 2, LANG, datatypeFiller(XSD_STRING))),
+                    "≥ 2 defaultLanguage.string");
+        });
+    }
+
+    @Test
+    void maxCardinalityExpression(@TempDir Path tempDir) throws Exception {
+        withPizza(tempDir, client -> {
+            assertStructuredAxiom(client, NS + "IceCream", "add-subclass-expression",
+                    subclassExpr("IceCream", cardinality("max", 1, NS + "hasBase", null)),
+                    "≤ 1 hasBase.⊤");
+            assertStructuredAxiom(client, NS + "IceCream", "add-subclass-expression",
+                    subclassExpr("IceCream", cardinality("max", 2, LANG, null)),
+                    "≤ 2 defaultLanguage.Literal");
+        });
+    }
+
+    @Test
+    void exactCardinalityExpression(@TempDir Path tempDir) throws Exception {
+        withPizza(tempDir, client -> {
+            assertStructuredAxiom(client, NS + "IceCream", "add-subclass-expression",
+                    subclassExpr("IceCream", cardinality("exactly", 1, NS + "hasBase", classFiller(NS + "PizzaBase"))),
+                    "= 1 hasBase.PizzaBase");
+            assertStructuredAxiom(client, NS + "IceCream", "add-subclass-expression",
+                    subclassExpr("IceCream", cardinality("exactly", 1, LANG, datatypeFiller(XSD_INTEGER))),
+                    "= 1 defaultLanguage.integer");
+        });
+    }
+
+    @Test
+    void intersectionExpression(@TempDir Path tempDir) throws Exception {
+        withPizza(tempDir, client -> assertStructuredAxiom(client, NS + "IceCream", "add-subclass-expression",
+                subclassExpr("IceCream", junction("intersection", classFiller(NS + "DomainConcept"), classFiller(NS + "Pizza"))),
+                "DomainConcept ⊓ Pizza"));
+    }
+
+    @Test
+    void unionExpression(@TempDir Path tempDir) throws Exception {
+        withPizza(tempDir, client -> assertStructuredAxiom(client, NS + "IceCream", "add-subclass-expression",
+                subclassExpr("IceCream", junction("union", classFiller(NS + "DomainConcept"), classFiller(NS + "Pizza"))),
+                "DomainConcept ⊔ Pizza"));
+    }
+
+    @Test
+    void complementExpression(@TempDir Path tempDir) throws Exception {
+        withPizza(tempDir, client -> assertStructuredAxiom(client, NS + "IceCream", "add-subclass-expression",
+                subclassExpr("IceCream", "{\"kind\":\"complement\",\"operand\":" + classFiller(NS + "DomainConcept") + "}"),
+                "¬DomainConcept"));
+    }
+
+    @Test
+    void namedClassExpression(@TempDir Path tempDir) throws Exception {
+        withPizza(tempDir, client -> assertStructuredAxiom(client, NS + "IceCream", "add-subclass-expression",
+                subclassExpr("IceCream", classFiller(NS + "Pizza")),
+                "IceCream ⊑ Pizza"));
+    }
+
+    @Test
+    void equivalentClassExpression(@TempDir Path tempDir) throws Exception {
+        withPizza(tempDir, client -> assertStructuredAxiom(client, NS + "IceCream", "add-equivalent-class",
+                action("add-equivalent-class", "{\"iri\":\"" + NS + "IceCream\",\"expression\":"
+                        + restriction("some", NS + "hasTopping", classFiller(NS + "MeatTopping")) + "}"),
+                "IceCream ≡ ∃ hasTopping.MeatTopping"));
+    }
+
+    @Test
+    void functionalPropertyCharacteristic(@TempDir Path tempDir) throws Exception {
+        withPizza(tempDir, client -> {
+            assertStructuredAxiom(client, NS + "hasTopping", "add-property-characteristic",
+                    characteristic(NS + "hasTopping", "functional", ""),
+                    "⊤ ⊑ ≤ 1 hasTopping");
+            assertStructuredAxiom(client, LANG, "add-property-characteristic",
+                    characteristic(LANG, "functional", ""),
+                    "⊤ ⊑ ≤ 1 defaultLanguage");
+        });
+    }
+
+    @Test
+    void inverseFunctionalPropertyCharacteristic(@TempDir Path tempDir) throws Exception {
+        withPizza(tempDir, client -> assertStructuredAxiom(client, NS + "hasTopping", "add-property-characteristic",
+                characteristic(NS + "hasTopping", "inverse-functional", ""),
+                "⊤ ⊑ ≤ 1 hasTopping⁻"));
+    }
+
+    @Test
+    void transitivePropertyCharacteristic(@TempDir Path tempDir) throws Exception {
+        withPizza(tempDir, client -> assertStructuredAxiom(client, NS + "hasTopping", "add-property-characteristic",
+                characteristic(NS + "hasTopping", "transitive", ""),
+                "hasTopping ∈ R⁺"));
+    }
+
+    @Test
+    void symmetricPropertyCharacteristic(@TempDir Path tempDir) throws Exception {
+        withPizza(tempDir, client -> assertStructuredAxiom(client, NS + "hasTopping", "add-property-characteristic",
+                characteristic(NS + "hasTopping", "symmetric", ""),
+                "hasTopping ≡ hasTopping⁻"));
+    }
+
+    @Test
+    void asymmetricPropertyCharacteristic(@TempDir Path tempDir) throws Exception {
+        withPizza(tempDir, client -> assertStructuredAxiom(client, NS + "hasTopping", "add-property-characteristic",
+                characteristic(NS + "hasTopping", "asymmetric", ""),
+                "hasTopping ⊑ ¬ hasTopping⁻"));
+    }
+
+    @Test
+    void reflexivePropertyCharacteristic(@TempDir Path tempDir) throws Exception {
+        withPizza(tempDir, client -> assertStructuredAxiom(client, NS + "hasTopping", "add-property-characteristic",
+                characteristic(NS + "hasTopping", "reflexive", ""),
+                "⊤ ⊑ ∃ hasTopping .self"));
+    }
+
+    @Test
+    void irreflexivePropertyCharacteristic(@TempDir Path tempDir) throws Exception {
+        withPizza(tempDir, client -> assertStructuredAxiom(client, NS + "hasTopping", "add-property-characteristic",
+                characteristic(NS + "hasTopping", "irreflexive", ""),
+                "⊤ ⊑ ¬∃ hasTopping .self"));
+    }
+
+    @Test
+    void inversePropertyCharacteristic(@TempDir Path tempDir) throws Exception {
+        withPizza(tempDir, client -> assertStructuredAxiom(client, NS + "hasCountryOfOrigin", "add-property-characteristic",
+                characteristic(NS + "hasCountryOfOrigin", "inverse",
+                        "\"inverse\":\"" + NS + "hasSpiciness\""),
+                "hasCountryOfOrigin ≡ hasSpiciness⁻"));
+    }
+
+    @Test
+    void propertyChainCharacteristic(@TempDir Path tempDir) throws Exception {
+        withPizza(tempDir, client -> assertStructuredAxiom(client, NS + "hasCountryOfOrigin", "add-property-characteristic",
+                characteristic(NS + "hasCountryOfOrigin", "chain",
+                        "\"chain\":[\"" + NS + "hasTopping\",\"" + NS + "hasSpiciness\"]"),
+                "hasTopping ∘ hasSpiciness ⊑ hasCountryOfOrigin"));
+    }
+
+    @Test
+    void objectPropertyAssertion(@TempDir Path tempDir) throws Exception {
+        withPizza(tempDir, client -> assertStructuredAxiom(client, NS + "Italy", "add-object-assertion",
+                action("add-object-assertion", "{\"iri\":\"" + NS + "Italy\",\"property\":\""
+                        + NS + "hasCountryOfOrigin\",\"target\":\"" + NS + "France\"}"),
+                "hasCountryOfOrigin(Italy, France)"));
+    }
+
+    @Test
+    void dataPropertyAssertion(@TempDir Path tempDir) throws Exception {
+        withPizza(tempDir, client -> assertStructuredAxiom(client, NS + "Italy", "add-data-assertion",
+                action("add-data-assertion", "{\"iri\":\"" + NS + "Italy\",\"property\":\""
+                        + LANG + "\",\"value\":\"7\",\"datatype\":\"integer\"}"),
+                "defaultLanguage(Italy, 7)"));
+    }
+
+    @Test
+    void sameIndividualAssertion(@TempDir Path tempDir) throws Exception {
+        withPizza(tempDir, client -> assertStructuredAxiom(client, NS + "Italy", "add-same-as",
+                action("add-same-as", "{\"iri\":\"" + NS + "Italy\",\"other\":\"" + NS + "France\"}"),
+                "France = Italy"));
+    }
+
+    @Test
+    void differentIndividualsAssertion(@TempDir Path tempDir) throws Exception {
+        withPizza(tempDir, client -> assertStructuredAxiom(client, NS + "America", "add-different-from",
+                action("add-different-from", "{\"iri\":\"" + NS + "America\",\"other\":\"" + NS + "Italy\"}"),
+                "America ≠ Italy"));
+    }
+
+    private static void withPizza(Path tempDir, Consumer<HttpClient> check) throws Exception {
+        Path copy = tempDir.resolve("pizza.owl");
+        Files.copy(Path.of(PIZZA), copy);
+        JavalinTest.test(Main.createApp(new Workspace(), "test"), (server, client) -> {
+            String opened = body(client.post("/ontology/open",
+                    "{\"path\":\"" + copy + "\"}", HEADERS));
+            assertTrue(opened.contains("\"axiomCount\":930"), opened);
+            check.accept(client);
+        });
+    }
+
+    private static String action(String name, String params) {
+        return "{\"action\":\"" + name + "\",\"params\":" + params + "}";
+    }
+
+    private static String subclassExpr(String className, String expression) {
+        return action("add-subclass-expression",
+                "{\"iri\":\"" + NS + className + "\",\"expression\":" + expression + "}");
+    }
+
+    private static String classFiller(String iri) {
+        return "{\"kind\":\"class\",\"iri\":\"" + iri + "\"}";
+    }
+
+    private static String datatypeFiller(String iri) {
+        return "{\"kind\":\"datatype\",\"iri\":\"" + iri + "\"}";
+    }
+
+    private static String restriction(String kind, String property, String filler) {
+        return "{\"kind\":\"" + kind + "\",\"property\":\"" + property + "\",\"filler\":" + filler + "}";
+    }
+
+    private static String cardinality(String kind, int n, String property, String filler) {
+        String fillerJson = filler == null ? "" : ",\"filler\":" + filler;
+        return "{\"kind\":\"" + kind + "\",\"property\":\"" + property
+                + "\",\"cardinality\":" + n + fillerJson + "}";
+    }
+
+    private static String junction(String kind, String left, String right) {
+        return "{\"kind\":\"" + kind + "\",\"operands\":[" + left + "," + right + "]}";
+    }
+
+    private static String characteristic(String iri, String characteristic, String extra) {
+        String tail = extra == null || extra.isBlank() ? "" : "," + extra;
+        return action("add-property-characteristic",
+                "{\"iri\":\"" + iri + "\",\"characteristic\":\"" + characteristic + "\"" + tail + "}");
+    }
+
+    private static void assertStructuredAxiom(HttpClient client, String iri, String actionName,
+                                              String json, String fragment) {
+        okhttp3.Response preview = client.post("/action/preview", json, HEADERS);
+        String previewBody = body(preview);
+        assertEquals(200, preview.code(), previewBody);
+        assertTrue(previewBody.contains("\"action\":\"" + actionName + "\""), previewBody);
+        assertTrue(previewBody.contains(fragment), previewBody);
+
+        String query = URLEncoder.encode(iri, StandardCharsets.UTF_8);
+        String before = body(client.get("/entity?iri=" + query, HEADERS));
+        assertFalse(before.contains(fragment), before);
+
+        okhttp3.Response commit = client.post("/action/commit", json, HEADERS);
+        String commitBody = body(commit);
+        assertEquals(200, commit.code(), commitBody);
+        assertTrue(commitBody.contains("\"canUndo\":true"), commitBody);
+        assertTrue(commitBody.contains("\"action\":\"" + actionName + "\""), commitBody);
+
+        String after = body(client.get("/entity?iri=" + query, HEADERS));
+        assertTrue(after.contains(fragment), after);
+
+        String evidence = body(client.get("/evidence?iri=" + query, HEADERS));
+        assertTrue(evidence.contains("\"actionName\":\"" + actionName + "\""), evidence);
+        assertTrue(evidence.contains(fragment), evidence);
+
+        String undo = body(client.post("/undo", "", HEADERS));
+        assertTrue(undo.contains("\"canRedo\":true"), undo);
+        String undone = body(client.get("/entity?iri=" + query, HEADERS));
+        assertFalse(undone.contains(fragment), undone);
+    }
+
     private static void open(HttpClient client) {
         String response = body(client.post("/ontology/open", "{\"path\":\"" + PIZZA + "\"}", HEADERS));
         assertTrue(response.contains("\"axiomCount\":930"), response);
@@ -598,6 +894,14 @@ class EngineApiTest {
 
     private static String encoded(String label) {
         return URLEncoder.encode(NS + label, StandardCharsets.UTF_8);
+    }
+
+    private static void restoreProperty(String name, String value) {
+        if (value == null) {
+            System.clearProperty(name);
+        } else {
+            System.setProperty(name, value);
+        }
     }
 
     private static String body(okhttp3.Response response) {

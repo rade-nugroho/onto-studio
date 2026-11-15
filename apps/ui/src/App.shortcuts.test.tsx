@@ -76,8 +76,7 @@ describe("App keyboard shortcuts", () => {
     vi.clearAllMocks();
   });
 
-  it("wires Cmd+O to openFile and ignores Cmd+Z inside search input", async () => {
-    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("/tmp/test.owl");
+  it("wires Cmd+O to openFile dialog and ignores Cmd+Z inside search input", async () => {
     render(<App />);
 
     await waitFor(() => expect(api.hierarchy).toHaveBeenCalled());
@@ -87,8 +86,9 @@ describe("App keyboard shortcuts", () => {
     expect(api.undo).not.toHaveBeenCalled();
 
     fireEvent.keyDown(window, { key: "o", metaKey: true });
+    const pathInput = await screen.findByLabelText("Ontology file path");
+    fireEvent.change(pathInput, { target: { value: "/tmp/test.owl" } });
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
     await waitFor(() => expect(api.open).toHaveBeenCalledWith("/tmp/test.owl"));
-
-    promptSpy.mockRestore();
   });
 });

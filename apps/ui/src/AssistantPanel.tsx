@@ -55,7 +55,7 @@ export default function AssistantPanel({
       >
         {turns.length === 0 && (
           <p className="muted">
-            Ask about the open ontology. Answers come from Claude, grounded in the
+            Ask about the open ontology. Answers come from DeepSeek, grounded in the
             ontology summary and the selected entity.
           </p>
         )}

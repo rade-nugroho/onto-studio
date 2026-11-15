@@ -1,4 +1,4 @@
-export type EngineInfo = { port: number; token: string };
+export type EngineInfo = { port: number; token: string; url?: string };
 
 export type OntologyInfo = {
   iri: string;
@@ -56,6 +56,38 @@ export type ActionPreview = {
   changes: string[];
 };
 
+export type ActionCommit = EditState & { action: string; summary: string[] };
+
+/** Datatype filler inside a data-property restriction. */
+export type DatatypeFiller = { kind: "datatype"; iri: string };
+
+/**
+ * Class-expression tree accepted by add-subclass-expression and add-equivalent-class.
+ * Data-property some/only/min/max/exactly use a DatatypeFiller as filler.
+ */
+export type ClassExpression =
+  | { kind: "class"; iri: string }
+  | { kind: "some" | "only"; property: string; filler: ClassExpression | DatatypeFiller }
+  | {
+      kind: "min" | "max" | "exactly";
+      property: string;
+      cardinality: number;
+      filler?: ClassExpression | DatatypeFiller;
+    }
+  | { kind: "intersection" | "union"; operands: ClassExpression[] }
+  | { kind: "complement"; operand: ClassExpression };
+
+export type PropertyCharacteristic =
+  | "functional"
+  | "inverse-functional"
+  | "transitive"
+  | "symmetric"
+  | "asymmetric"
+  | "reflexive"
+  | "irreflexive"
+  | "inverse"
+  | "chain";
+
 export type AuditRow = EvidenceRow & {
   entities: string[];
   actionName?: string;
@@ -101,6 +133,50 @@ export type SearchResult = {
   kind: string;
 };
 
+export type ConnectorApp = {
+  id: string;
+  name: string;
+  authType: string;
+  locallyExecutable: boolean;
+};
+
+export type ConnectorConnection = {
+  service: string;
+  name: string;
+  authType: string;
+  status: "connected" | "reconnect";
+  appId?: string;
+};
+
+export type ConnectorAction = {
+  id: string;
+  description: string;
+  outputFields: string[];
+};
+
+export type ConnectorMappingBody = {
+  connectionName: string;
+  service: string;
+  actionId: string;
+  classIri?: string;
+  newClassName?: string;
+  idField: string;
+  fieldMap: Record<string, string>;
+  actionInput?: Record<string, unknown>;
+  sampleLimit?: number;
+};
+
+export type ConnectorMappingPreview = {
+  classIri: string;
+  individuals: EntityInfo[];
+  stored: boolean;
+};
+
+export type ConnectorGatewayList<T> = {
+  gatewayAvailable: boolean;
+  error?: string;
+} & T;
+
 let cached: EngineInfo | null = null;
 
 async function engine(): Promise<EngineInfo> {
@@ -111,7 +187,18 @@ async function engine(): Promise<EngineInfo> {
     const { invoke } = await import("@tauri-apps/api/core");
     cached = await invoke<EngineInfo>("engine_info");
   } catch {
-    cached = { port: 7717, token: "dev" };
+    const env = import.meta.env;
+    const rawPort = Number.parseInt(String(env.VITE_ENGINE_PORT ?? ""), 10);
+    const port = Number.isInteger(rawPort) && rawPort > 0 && rawPort <= 65535 ? rawPort : 7717;
+    const token =
+      typeof env.VITE_ENGINE_TOKEN === "string" && env.VITE_ENGINE_TOKEN.length > 0
+        ? env.VITE_ENGINE_TOKEN
+        : "dev";
+    const url =
+      typeof env.VITE_ENGINE_URL === "string" && env.VITE_ENGINE_URL.trim().length > 0
+        ? env.VITE_ENGINE_URL.trim().replace(/\/+$/, "")
+        : undefined;
+    cached = { port, token, url };
   }
   return cached;
 }
@@ -174,7 +261,8 @@ async function call<T>(
   const { signal, cleanup } = withTimeoutSignal(externalSignal ?? undefined, timeoutMs);
   let response: Response;
   try {
-    response = await fetch(`http://127.0.0.1:${info.port}${path}`, {
+    const baseUrl = info.url ?? `http://127.0.0.1:${info.port}`;
+    response = await fetch(`${baseUrl}${path}`, {
       ...fetchInit,
       signal,
       headers: {
@@ -212,6 +300,13 @@ async function call<T>(
     );
   }
   return response.json() as Promise<T>;
+}
+
+function postAction<T>(path: "/action/preview" | "/action/commit", action: string, params: object, reason?: string) {
+  return call<T>(path, {
+    method: "POST",
+    body: JSON.stringify(reason === undefined ? { action, params } : { action, params, reason }),
+  });
 }
 
 export const api = {
@@ -280,10 +375,70 @@ export const api = {
     params: Record<string, string>,
     reason?: string,
   ) =>
-    call<EditState & { action: string; summary: string[] }>("/action/commit", {
+    call<ActionCommit>("/action/commit", {
       method: "POST",
       body: JSON.stringify({ action, params, reason }),
     }),
+  previewSubclassExpression: (iri: string, expression: ClassExpression) =>
+    postAction<ActionPreview>("/action/preview", "add-subclass-expression", { iri, expression }),
+  commitSubclassExpression: (iri: string, expression: ClassExpression, reason?: string) =>
+    postAction<ActionCommit>("/action/commit", "add-subclass-expression", { iri, expression }, reason),
+  previewEquivalentClass: (iri: string, expression: ClassExpression) =>
+    postAction<ActionPreview>("/action/preview", "add-equivalent-class", { iri, expression }),
+  commitEquivalentClass: (iri: string, expression: ClassExpression, reason?: string) =>
+    postAction<ActionCommit>("/action/commit", "add-equivalent-class", { iri, expression }, reason),
+  previewPropertyCharacteristic: (
+    iri: string,
+    characteristic: PropertyCharacteristic,
+    extra?: { inverse?: string; chain?: string[] },
+  ) =>
+    postAction<ActionPreview>("/action/preview", "add-property-characteristic", {
+      iri,
+      characteristic,
+      ...extra,
+    }),
+  commitPropertyCharacteristic: (
+    iri: string,
+    characteristic: PropertyCharacteristic,
+    extra?: { inverse?: string; chain?: string[] },
+    reason?: string,
+  ) =>
+    postAction<ActionCommit>(
+      "/action/commit",
+      "add-property-characteristic",
+      { iri, characteristic, ...extra },
+      reason,
+    ),
+  previewClassAssertion: (iri: string, classIri: string) =>
+    postAction<ActionPreview>("/action/preview", "add-type", { iri, class: classIri }),
+  commitClassAssertion: (iri: string, classIri: string, reason?: string) =>
+    postAction<ActionCommit>("/action/commit", "add-type", { iri, class: classIri }, reason),
+  previewObjectAssertion: (iri: string, property: string, target: string) =>
+    postAction<ActionPreview>("/action/preview", "add-object-assertion", { iri, property, target }),
+  commitObjectAssertion: (iri: string, property: string, target: string, reason?: string) =>
+    postAction<ActionCommit>("/action/commit", "add-object-assertion", { iri, property, target }, reason),
+  previewDataAssertion: (iri: string, property: string, value: string, datatype?: string) =>
+    postAction<ActionPreview>("/action/preview", "add-data-assertion", {
+      iri,
+      property,
+      value,
+      ...(datatype ? { datatype } : {}),
+    }),
+  commitDataAssertion: (iri: string, property: string, value: string, datatype?: string, reason?: string) =>
+    postAction<ActionCommit>(
+      "/action/commit",
+      "add-data-assertion",
+      { iri, property, value, ...(datatype ? { datatype } : {}) },
+      reason,
+    ),
+  previewSameAs: (iri: string, other: string) =>
+    postAction<ActionPreview>("/action/preview", "add-same-as", { iri, other }),
+  commitSameAs: (iri: string, other: string, reason?: string) =>
+    postAction<ActionCommit>("/action/commit", "add-same-as", { iri, other }, reason),
+  previewDifferentFrom: (iri: string, other: string) =>
+    postAction<ActionPreview>("/action/preview", "add-different-from", { iri, other }),
+  commitDifferentFrom: (iri: string, other: string, reason?: string) =>
+    postAction<ActionCommit>("/action/commit", "add-different-from", { iri, other }, reason),
   audit: (signal?: AbortSignal) => call<{ rows: AuditRow[] }>("/audit", { signal }),
   setMarking: (iri: string, marking: string) =>
     call<{ iri: string; marking: string }>("/marking/set", {
@@ -352,4 +507,39 @@ export const api = {
     }
     return call<{ results: SearchResult[] }>(`/search?${params.toString()}`, { signal });
   },
+  connectorApps: (query?: string, signal?: AbortSignal) => {
+    const params = new URLSearchParams();
+    if (query) {
+      params.set("q", query);
+    }
+    const suffix = params.toString();
+    return call<ConnectorGatewayList<{ apps: ConnectorApp[]; truncated?: boolean }>>(
+      `/connectors/apps${suffix ? `?${suffix}` : ""}`,
+      { signal, timeoutMs: 8_000 },
+    );
+  },
+  connectorConnections: (signal?: AbortSignal) =>
+    call<ConnectorGatewayList<{ connections: ConnectorConnection[] }>>("/connectors/connections", {
+      signal,
+      timeoutMs: 8_000,
+    }),
+  connectorActions: (app: string, signal?: AbortSignal) =>
+    call<ConnectorGatewayList<{ actions: ConnectorAction[] }>>(
+      `/connectors/actions?app=${encodeURIComponent(app)}`,
+      { signal, timeoutMs: 8_000 },
+    ),
+  connectorMappings: (signal?: AbortSignal) =>
+    call<{ mappings: unknown[]; gatewayAvailable: boolean }>("/connectors/mappings", { signal }),
+  previewConnectorMapping: (body: ConnectorMappingBody) =>
+    call<ConnectorMappingPreview>("/connectors/mapping/preview", {
+      method: "POST",
+      body: JSON.stringify(body),
+      timeoutMs: 15_000,
+    }),
+  commitConnectorMapping: (body: ConnectorMappingBody) =>
+    call<{ classIri: string; stored: boolean }>("/connectors/mapping/commit", {
+      method: "POST",
+      body: JSON.stringify(body),
+      timeoutMs: 15_000,
+    }),
 };

@@ -97,14 +97,14 @@ Click an axiom in the UI to see its evidence inline.
 
 ## Assistant configuration
 
-The assistant reads credentials from, in order: the process environment, a
-`.env.local` in the working directory (or up to two levels above), `.env.local`
-next to the engine jar, and `~/.onto-studio.env` for the packaged app:
+The assistant calls OpenRouter `POST https://openrouter.ai/api/v1/chat/completions`
+with model `deepseek/deepseek-v4.1-flash-1017`. It reads `OPENROUTER_API_KEY`
+from, in order: the process environment, a `.env.local` in the working directory
+(or up to two levels above), `.env.local` next to the engine jar, and
+`~/.onto-studio.env` for the packaged app:
 
 ```
-ANTHROPIC_API_KEY=...
-ANTHROPIC_MODEL=claude-haiku-5-5        # optional
-ANTHROPIC_API_URL=https://api.anthropic.com   # optional, full /v1/messages URL also accepted
+OPENROUTER_API_KEY=...
 ```
 
 ## Run the engine alone
@@ -146,7 +146,7 @@ curl -H "X-Engine-Token: dev" "http://127.0.0.1:7717/graph?depth=2"
 | `POST /axiom/subclass` | Add a `SubClassOf` axiom |
 | `POST /axiom/subclass/remove` | Remove a `SubClassOf` axiom |
 | `POST /ontology/save` | Save to the opened file or a new path |
-| `POST /assistant` | Ask the ontology assistant (Claude Managed Agents) |
+| `POST /assistant` | Ask the ontology assistant (OpenRouter DeepSeek) |
 
 All endpoints require the `X-Engine-Token` header.
 
@@ -161,7 +161,7 @@ All endpoints require the `X-Engine-Token` header.
 P0-P4 done: open, browse, search, graph, editing (superclass + free Manchester
 axioms, properties/individuals), undo/redo, structural reasoner, command
 palette (Cmd+K), keyboard shortcuts (Cmd+Z/S/1/2), assistant grounded in the
-ontology (Claude Managed Agents with ontology tools, needs `ANTHROPIC_API_KEY`), and a packaged macOS app
+ontology (OpenRouter DeepSeek with ontology tools, needs `OPENROUTER_API_KEY`), and a packaged macOS app
 with a bundled Java runtime (`scripts/package.sh`).
 
 ## History

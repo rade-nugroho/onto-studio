@@ -19,7 +19,9 @@ import org.semanticweb.owlapi.model.OWLClass;
 import org.semanticweb.owlapi.model.OWLClassExpression;
 import org.semanticweb.owlapi.model.OWLDataFactory;
 import org.semanticweb.owlapi.model.OWLDataProperty;
+import org.semanticweb.owlapi.model.OWLDataRange;
 import org.semanticweb.owlapi.model.OWLDatatype;
+import org.semanticweb.owlapi.model.OWLLiteral;
 import org.semanticweb.owlapi.model.OWLEntity;
 import org.semanticweb.owlapi.model.OWLIndividual;
 import org.semanticweb.owlapi.model.OWLNamedIndividual;
@@ -35,6 +37,9 @@ import org.semanticweb.owlapi.search.EntitySearcher;
 import org.semanticweb.owlapi.util.BidirectionalShortFormProviderAdapter;
 import org.semanticweb.owlapi.util.OntologyAxiomPair;
 import org.semanticweb.owlapi.util.SimpleShortFormProvider;
+import studio.onto.engine.connector.ConnectorException;
+import studio.onto.engine.connector.ConnectorMapping;
+import studio.onto.engine.connector.ConnectorService;
 import studio.onto.engine.plugin.Plugin;
 import studio.onto.engine.plugin.PluginLoader;
 import studio.onto.engine.plugin.RemotePlugin;
@@ -52,6 +57,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Deque;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -82,6 +88,8 @@ public final class Workspace implements Plugin.PluginContext, AutoCloseable {
     private String activeBranch;
     private EvidenceStore evidence;
     private MarkingStore markings;
+    private ConnectorMapping connectorMappings;
+    private final ConnectorService connectors = new ConnectorService();
     private final List<Plugin> plugins = new ArrayList<>(PluginLoader.load());
     private final PluginCatalog catalog = new PluginCatalog(PluginCatalog.defaultPath());
     private OWLReasoner reasoner;
@@ -152,9 +160,23 @@ public final class Workspace implements Plugin.PluginContext, AutoCloseable {
         activeBranch = null;
         evidence = new EvidenceStore(EvidenceStore.defaultPath(file.toPath()));
         markings = new MarkingStore(MarkingStore.defaultPath(file.toPath()));
+        connectorMappings = new ConnectorMapping(ConnectorMapping.defaultPath(file.toPath()));
+        connectors.bindSession(ontology, dataFactory, connectorMappings, evidence,
+                iri -> labelByIri(iri));
         undoStack.clear();
         redoStack.clear();
         savedDepth = 0;
+    }
+
+    private String labelByIri(String iri) {
+        if (ontology == null || iri == null) {
+            return iri;
+        }
+        OWLEntity entity = ontology.signature()
+                .filter(candidate -> candidate.getIRI().toString().equals(iri))
+                .findFirst()
+                .orElse(null);
+        return entity == null ? iri : label(entity);
     }
 
     public synchronized String currentPath() {
@@ -256,6 +278,20 @@ public final class Workspace implements Plugin.PluginContext, AutoCloseable {
             ctx.status(400).json(Map.of("error", "Missing iri"));
             return;
         }
+        Map<String, Object> connectorIndividual;
+        try {
+            connectorIndividual = connectors.entityForMappedIndividual(iri);
+        } catch (ConnectorException error) {
+            ctx.status(503).json(Map.of(
+                    "error", error.getMessage(),
+                    "code", error.code(),
+                    "gatewayAvailable", false));
+            return;
+        }
+        if (!connectorIndividual.isEmpty()) {
+            ctx.json(connectorIndividual);
+            return;
+        }
         OWLEntity entity = ontology.signature()
                 .filter(candidate -> candidate.getIRI().toString().equals(iri))
                 .findFirst()
@@ -293,6 +329,18 @@ public final class Workspace implements Plugin.PluginContext, AutoCloseable {
                 : List.of());
         response.put("annotations", annotationsOf(entity));
         response.put("axioms", axiomsOf(entity));
+        if (entity instanceof OWLClass cls) {
+            try {
+                List<Map<String, Object>> remote = connectors.searchMappedIndividuals(
+                        cls.getIRI().toString(), "", SEARCH_LIMIT);
+                if (!remote.isEmpty()) {
+                    response.put("connectorIndividuals", remote);
+                }
+            } catch (ConnectorException error) {
+                response.put("connectorError", error.getMessage());
+                response.put("gatewayAvailable", false);
+            }
+        }
         ctx.json(response);
     }
 
@@ -313,7 +361,7 @@ public final class Workspace implements Plugin.PluginContext, AutoCloseable {
                 ontology.dataPropertiesInSignature(),
                 ontology.annotationPropertiesInSignature(),
                 ontology.individualsInSignature()).flatMap(stream -> stream);
-        List<Map<String, Object>> results = entities
+        List<Map<String, Object>> results = new ArrayList<>(entities
                 .filter(entity -> !hasKind || kind(entity).equals(kindFilter))
                 .filter(entity -> needle.isEmpty()
                         || label(entity).toLowerCase().contains(needle)
@@ -323,8 +371,42 @@ public final class Workspace implements Plugin.PluginContext, AutoCloseable {
                         "iri", entity.getIRI().toString(),
                         "label", label(entity),
                         "kind", kind(entity)))
-                .toList();
+                .toList());
+        if (connectorMappings != null) {
+            for (ConnectorMapping.ClassMapping mapping : connectorMappings.all()) {
+                if (hasKind && !"individual".equals(kindFilter) && !"class".equals(kindFilter)) {
+                    continue;
+                }
+                try {
+                    List<Map<String, Object>> remote = connectors.searchMappedIndividuals(
+                            mapping.classIri(), needle, SEARCH_LIMIT - results.size());
+                    for (Map<String, Object> row : remote) {
+                        if (results.size() >= SEARCH_LIMIT) {
+                            break;
+                        }
+                        if (results.stream().noneMatch(r -> row.get("iri").equals(r.get("iri")))) {
+                            results.add(Map.of(
+                                    "iri", row.get("iri"),
+                                    "label", row.get("label"),
+                                    "kind", "individual"));
+                        }
+                    }
+                } catch (ConnectorException error) {
+                    if (results.isEmpty()) {
+                        ctx.status(503).json(Map.of(
+                                "error", error.getMessage(),
+                                "code", error.code(),
+                                "gatewayAvailable", false));
+                        return;
+                    }
+                }
+            }
+        }
         ctx.json(Map.of("results", results));
+    }
+
+    public ConnectorService connectors() {
+        return connectors;
     }
 
     /**
@@ -1206,13 +1288,38 @@ public final class Workspace implements Plugin.PluginContext, AutoCloseable {
     }
 
     private record Plan(String name, List<OWLOntologyChange> changes, List<String> summary,
-                        List<String> entities, Map<String, String> params) {
+                        List<String> entities, Map<String, Object> params) {
     }
 
+    /**
+     * Structured axioms use the same preview/commit path as the string actions.
+     * Class expressions are JSON objects, not Manchester text.
+     *
+     * <p>{@code add-subclass-expression} and {@code add-equivalent-class}:
+     * {@code iri} is the selected class. {@code expression} is one of
+     * {@code {"kind":"class","iri"}},
+     * {@code {"kind":"some"|"only","property","filler"}},
+     * {@code {"kind":"min"|"max"|"exactly","property","cardinality","filler"?}},
+     * {@code {"kind":"intersection"|"union","operands"}},
+     * {@code {"kind":"complement","operand"}}.
+     * A data-property filler is {@code {"kind":"datatype","iri"}}.
+     *
+     * <p>{@code add-property-characteristic}: {@code iri} plus
+     * {@code characteristic} of functional, inverse-functional, transitive,
+     * symmetric, asymmetric, reflexive, irreflexive, inverse ({@code inverse}
+     * IRI), or chain ({@code chain} array of at least two property IRIs).
+     * Functional also accepts a data property.
+     *
+     * <p>{@code add-object-assertion}: {@code iri}, {@code property}, {@code target}.
+     * {@code add-data-assertion}: {@code iri}, {@code property}, {@code value},
+     * optional {@code datatype}. {@code add-same-as} and {@code add-different-from}:
+     * {@code iri}, {@code other}. Class assertions stay on {@code add-type}
+     * ({@code iri}, {@code class}).
+     */
     private Plan plan(Main.ActionRequest request) {
         String name = request.action() == null ? "" : request.action();
-        Map<String, String> params = request.params() == null ? Map.of() : request.params();
-        OWLEntity entity = entity(params.get("iri"));
+        Map<String, Object> params = request.params() == null ? Map.of() : request.params();
+        OWLEntity entity = entity(text(params, "iri"));
         List<OWLOntologyChange> changes = new ArrayList<>();
         List<String> summary = new ArrayList<>();
 
@@ -1223,7 +1330,7 @@ public final class Workspace implements Plugin.PluginContext, AutoCloseable {
                 .orElse(null);
         if (pluginAction != null) {
             int axiomCountBefore = ontology.getAxiomCount();
-            List<Plugin.PluginChange> planned = pluginAction.plan(this, params);
+            List<Plugin.PluginChange> planned = pluginAction.plan(this, stringParams(params));
             if (ontology.getAxiomCount() != axiomCountBefore) {
                 throw new IllegalStateException(
                         "Plugin " + pluginAction.name() + " mutated the ontology while planning");
@@ -1243,10 +1350,7 @@ public final class Workspace implements Plugin.PluginContext, AutoCloseable {
         switch (name) {
             case "set-label" -> {
                 require(entity, "iri");
-                String label = params.get("label");
-                if (label == null || label.isBlank()) {
-                    throw new IllegalArgumentException("Missing label");
-                }
+                String label = requiredText(params, "label");
                 List<OWLAnnotation> existing = EntitySearcher
                         .getAnnotations(entity, ontology, dataFactory.getRDFSLabel()).toList();
                 for (OWLAnnotation annotation : existing) {
@@ -1260,7 +1364,7 @@ public final class Workspace implements Plugin.PluginContext, AutoCloseable {
             }
             case "add-subclass" -> {
                 require(entity, "iri");
-                OWLEntity parent = entity(params.get("parent"));
+                OWLEntity parent = entity(requiredText(params, "parent"));
                 require(parent, "parent");
                 OWLClass child = entity.asOWLClass();
                 OWLClass sup = parent.asOWLClass();
@@ -1269,7 +1373,7 @@ public final class Workspace implements Plugin.PluginContext, AutoCloseable {
             }
             case "remove-subclass" -> {
                 require(entity, "iri");
-                OWLEntity parent = entity(params.get("parent"));
+                OWLEntity parent = entity(requiredText(params, "parent"));
                 require(parent, "parent");
                 OWLClass child = entity.asOWLClass();
                 OWLClass sup = parent.asOWLClass();
@@ -1278,7 +1382,7 @@ public final class Workspace implements Plugin.PluginContext, AutoCloseable {
             }
             case "set-domain" -> {
                 require(entity, "iri");
-                OWLEntity domain = entity(params.get("class"));
+                OWLEntity domain = entity(requiredText(params, "class"));
                 require(domain, "class");
                 OWLClassExpression domainExpr = domain.asOWLClass();
                 if (entity instanceof OWLObjectProperty property) {
@@ -1301,7 +1405,7 @@ public final class Workspace implements Plugin.PluginContext, AutoCloseable {
             case "set-range" -> {
                 require(entity, "iri");
                 if (entity instanceof OWLObjectProperty property) {
-                    OWLEntity range = entity(params.get("class"));
+                    OWLEntity range = entity(requiredText(params, "class"));
                     require(range, "class");
                     EntitySearcher.getRanges(property, ontology).toList()
                             .forEach(existing -> changes.add(new RemoveAxiom(ontology,
@@ -1310,10 +1414,7 @@ public final class Workspace implements Plugin.PluginContext, AutoCloseable {
                             dataFactory.getOWLObjectPropertyRangeAxiom(property, range.asOWLClass())));
                     summary.add("set range: " + label(range));
                 } else if (entity instanceof OWLDataProperty property) {
-                    String datatype = params.get("datatype");
-                    if (datatype == null || datatype.isBlank()) {
-                        throw new IllegalArgumentException("Missing datatype");
-                    }
+                    String datatype = requiredText(params, "datatype");
                     OWLDatatype range = dataFactory.getOWLDatatype(IRI.create(datatypeIri(datatype)));
                     EntitySearcher.getRanges(property, ontology).toList()
                             .forEach(existing -> changes.add(new RemoveAxiom(ontology,
@@ -1327,7 +1428,7 @@ public final class Workspace implements Plugin.PluginContext, AutoCloseable {
             }
             case "add-type" -> {
                 require(entity, "iri");
-                OWLEntity type = entity(params.get("class"));
+                OWLEntity type = entity(requiredText(params, "class"));
                 require(type, "class");
                 changes.add(new AddAxiom(ontology,
                         dataFactory.getOWLClassAssertionAxiom(type.asOWLClass(), entity.asOWLNamedIndividual())));
@@ -1335,19 +1436,387 @@ public final class Workspace implements Plugin.PluginContext, AutoCloseable {
             }
             case "remove-type" -> {
                 require(entity, "iri");
-                OWLEntity type = entity(params.get("class"));
+                OWLEntity type = entity(requiredText(params, "class"));
                 require(type, "class");
                 changes.add(new RemoveAxiom(ontology,
                         dataFactory.getOWLClassAssertionAxiom(type.asOWLClass(), entity.asOWLNamedIndividual())));
                 summary.add("remove type: " + label(type));
             }
+            case "add-subclass-expression" -> planClassAxiom(entity, params, false, changes, summary);
+            case "add-equivalent-class" -> planClassAxiom(entity, params, true, changes, summary);
+            case "add-property-characteristic" ->
+                    addAxiom(changes, summary, propertyCharacteristic(entity, params));
+            case "add-object-assertion" -> planObjectAssertion(entity, params, changes, summary);
+            case "add-data-assertion" -> planDataAssertion(entity, params, changes, summary);
+            case "add-same-as" -> planIndividualPair(entity, params, true, changes, summary);
+            case "add-different-from" -> planIndividualPair(entity, params, false, changes, summary);
             default -> throw new IllegalArgumentException("Unknown action: " + name);
         }
 
-        List<String> entities = entity == null
-                ? List.of()
-                : List.of(entity.getIRI().toString());
-        return new Plan(name, changes, summary, entities, params);
+        return new Plan(name, changes, summary, entitiesFor(name, entity, changes), params);
+    }
+
+    private static Map<String, String> stringParams(Map<String, Object> params) {
+        Map<String, String> strings = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> entry : params.entrySet()) {
+            Object value = entry.getValue();
+            if (value == null) {
+                continue;
+            }
+            if (!(value instanceof String text)) {
+                throw new IllegalArgumentException("Plugin actions accept string params only");
+            }
+            strings.put(entry.getKey(), text);
+        }
+        return strings;
+    }
+
+    private static String text(Map<String, Object> params, String key) {
+        Object value = params.get(key);
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof String text) {
+            return text;
+        }
+        throw new IllegalArgumentException(key + " must be a string");
+    }
+
+    private static String requiredText(Map<String, Object> params, String key) {
+        String value = text(params, key);
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException("Missing " + key);
+        }
+        return value;
+    }
+
+    private static List<String> entitiesFor(String name, OWLEntity subject, List<OWLOntologyChange> changes) {
+        boolean structured = switch (name) {
+            case "add-subclass-expression", "add-equivalent-class", "add-property-characteristic",
+                    "add-object-assertion", "add-data-assertion", "add-same-as", "add-different-from" -> true;
+            default -> false;
+        };
+        if (!structured) {
+            return subject == null ? List.of() : List.of(subject.getIRI().toString());
+        }
+        List<String> iris = new ArrayList<>();
+        for (OWLOntologyChange change : changes) {
+            change.getAxiom().signature().forEach(signed -> {
+                String iri = signed.getIRI().toString();
+                if (!iris.contains(iri)) {
+                    iris.add(iri);
+                }
+            });
+        }
+        if (iris.isEmpty() && subject != null) {
+            iris.add(subject.getIRI().toString());
+        }
+        return iris;
+    }
+
+    private void addAxiom(List<OWLOntologyChange> changes, List<String> summary, OWLAxiom axiom) {
+        changes.add(new AddAxiom(ontology, axiom));
+        summary.add("add: " + renderAxiom(axiom));
+    }
+
+    private void planClassAxiom(OWLEntity selected, Map<String, Object> params, boolean equivalent,
+                                List<OWLOntologyChange> changes, List<String> summary) {
+        require(selected, "iri");
+        if (!(selected instanceof OWLClass cls)) {
+            throw new IllegalArgumentException("Class axioms apply to classes only");
+        }
+        if (!params.containsKey("expression")) {
+            throw new IllegalArgumentException("Missing expression");
+        }
+        OWLClassExpression expression = classExpression(params.get("expression"), "expression");
+        OWLAxiom axiom = equivalent
+                ? dataFactory.getOWLEquivalentClassesAxiom(cls, expression)
+                : dataFactory.getOWLSubClassOfAxiom(cls, expression);
+        addAxiom(changes, summary, axiom);
+    }
+
+    private OWLAxiom propertyCharacteristic(OWLEntity selected, Map<String, Object> params) {
+        require(selected, "iri");
+        String characteristic = requiredText(params, "characteristic");
+        return switch (characteristic) {
+            case "functional" -> functional(selected);
+            case "inverse-functional" ->
+                    dataFactory.getOWLInverseFunctionalObjectPropertyAxiom(objectProperty(selected));
+            case "transitive" -> dataFactory.getOWLTransitiveObjectPropertyAxiom(objectProperty(selected));
+            case "symmetric" -> dataFactory.getOWLSymmetricObjectPropertyAxiom(objectProperty(selected));
+            case "asymmetric" -> dataFactory.getOWLAsymmetricObjectPropertyAxiom(objectProperty(selected));
+            case "reflexive" -> dataFactory.getOWLReflexiveObjectPropertyAxiom(objectProperty(selected));
+            case "irreflexive" -> dataFactory.getOWLIrreflexiveObjectPropertyAxiom(objectProperty(selected));
+            case "inverse" -> inverse(selected, params);
+            case "chain" -> chain(selected, params);
+            default -> throw new IllegalArgumentException("Unknown property characteristic: " + characteristic);
+        };
+    }
+
+    private OWLAxiom functional(OWLEntity selected) {
+        if (selected instanceof OWLObjectProperty property) {
+            return dataFactory.getOWLFunctionalObjectPropertyAxiom(property);
+        }
+        if (selected instanceof OWLDataProperty property) {
+            return dataFactory.getOWLFunctionalDataPropertyAxiom(property);
+        }
+        throw new IllegalArgumentException("Functional applies to properties only");
+    }
+
+    private static OWLObjectProperty objectProperty(OWLEntity entity) {
+        if (entity instanceof OWLObjectProperty property) {
+            return property;
+        }
+        throw new IllegalArgumentException("This characteristic applies to object properties only");
+    }
+
+    private OWLAxiom inverse(OWLEntity selected, Map<String, Object> params) {
+        OWLObjectProperty property = objectProperty(selected);
+        OWLEntity other = known(requiredText(params, "inverse"), "inverse");
+        if (!(other instanceof OWLObjectProperty inverseProperty)) {
+            throw new IllegalArgumentException("inverse must be an object property");
+        }
+        return dataFactory.getOWLInverseObjectPropertiesAxiom(property, inverseProperty);
+    }
+
+    private OWLAxiom chain(OWLEntity selected, Map<String, Object> params) {
+        OWLObjectProperty property = objectProperty(selected);
+        Object raw = params.get("chain");
+        if (!(raw instanceof List<?> list) || list.size() < 2) {
+            throw new IllegalArgumentException("chain must list at least two object properties");
+        }
+        List<OWLObjectProperty> links = new ArrayList<>();
+        for (Object item : list) {
+            if (!(item instanceof String iri) || iri.isBlank()) {
+                throw new IllegalArgumentException("chain entries must be property IRIs");
+            }
+            OWLEntity link = known(iri, "chain");
+            if (!(link instanceof OWLObjectProperty linkProperty)) {
+                throw new IllegalArgumentException("chain entries must be object properties");
+            }
+            links.add(linkProperty);
+        }
+        return dataFactory.getOWLSubPropertyChainOfAxiom(links, property);
+    }
+
+    private void planObjectAssertion(OWLEntity selected, Map<String, Object> params,
+                                     List<OWLOntologyChange> changes, List<String> summary) {
+        OWLNamedIndividual subject = namedIndividual(selected, "iri");
+        OWLEntity propertyEntity = known(requiredText(params, "property"), "property");
+        if (!(propertyEntity instanceof OWLObjectProperty property)) {
+            throw new IllegalArgumentException("property must be an object property");
+        }
+        OWLNamedIndividual target = namedIndividual(known(requiredText(params, "target"), "target"), "target");
+        addAxiom(changes, summary, dataFactory.getOWLObjectPropertyAssertionAxiom(property, subject, target));
+    }
+
+    private void planDataAssertion(OWLEntity selected, Map<String, Object> params,
+                                   List<OWLOntologyChange> changes, List<String> summary) {
+        OWLNamedIndividual subject = namedIndividual(selected, "iri");
+        OWLEntity propertyEntity = known(requiredText(params, "property"), "property");
+        if (!(propertyEntity instanceof OWLDataProperty property)) {
+            throw new IllegalArgumentException("property must be a data property");
+        }
+        String value = requiredText(params, "value");
+        String datatype = text(params, "datatype");
+        OWLLiteral literal = datatype == null || datatype.isBlank()
+                ? dataFactory.getOWLLiteral(value)
+                : dataFactory.getOWLLiteral(value, dataFactory.getOWLDatatype(IRI.create(datatypeIri(datatype))));
+        addAxiom(changes, summary, dataFactory.getOWLDataPropertyAssertionAxiom(property, subject, literal));
+    }
+
+    private void planIndividualPair(OWLEntity selected, Map<String, Object> params, boolean same,
+                                    List<OWLOntologyChange> changes, List<String> summary) {
+        OWLNamedIndividual subject = namedIndividual(selected, "iri");
+        OWLNamedIndividual other = namedIndividual(known(requiredText(params, "other"), "other"), "other");
+        OWLAxiom axiom = same
+                ? dataFactory.getOWLSameIndividualAxiom(subject, other)
+                : dataFactory.getOWLDifferentIndividualsAxiom(subject, other);
+        addAxiom(changes, summary, axiom);
+    }
+
+    private static OWLNamedIndividual namedIndividual(OWLEntity entity, String field) {
+        require(entity, field);
+        if (entity instanceof OWLNamedIndividual individual) {
+            return individual;
+        }
+        throw new IllegalArgumentException(field + " must be an individual");
+    }
+
+    private OWLEntity known(String iri, String field) {
+        OWLEntity found = entity(iri);
+        if (found == null) {
+            throw new IllegalArgumentException("Unknown entity for " + field + ": " + iri);
+        }
+        return found;
+    }
+
+    private OWLClassExpression classExpression(Object node, String field) {
+        Map<String, Object> tree = object(node, field);
+        String kind = text(tree, "kind");
+        if (kind == null || kind.isBlank()) {
+            throw new IllegalArgumentException("Missing expression kind");
+        }
+        return switch (kind) {
+            case "class" -> namedClass(requiredText(tree, "iri"));
+            case "some", "only" -> restriction(tree, kind);
+            case "min", "max", "exactly" -> cardinalityRestriction(tree, kind);
+            case "intersection" -> junction(tree, true);
+            case "union" -> junction(tree, false);
+            case "complement" -> dataFactory.getOWLObjectComplementOf(
+                    classExpression(tree.get("operand"), "operand"));
+            default -> throw new IllegalArgumentException("Unknown expression kind: " + kind);
+        };
+    }
+
+    private OWLClass namedClass(String iri) {
+        OWLEntity found = known(iri, "expression");
+        if (!(found instanceof OWLClass cls)) {
+            throw new IllegalArgumentException("Expected a class: " + iri);
+        }
+        return cls;
+    }
+
+    private OWLEntity propertyOf(Map<String, Object> tree) {
+        return known(requiredText(tree, "property"), "property");
+    }
+
+    private OWLClassExpression restriction(Map<String, Object> tree, String kind) {
+        OWLEntity property = propertyOf(tree);
+        if (!tree.containsKey("filler") || tree.get("filler") == null) {
+            throw new IllegalArgumentException("Missing filler");
+        }
+        if (property instanceof OWLObjectProperty objectProperty) {
+            OWLClassExpression filler = classExpression(tree.get("filler"), "filler");
+            if ("some".equals(kind)) {
+                return dataFactory.getOWLObjectSomeValuesFrom(objectProperty, filler);
+            }
+            if ("only".equals(kind)) {
+                return dataFactory.getOWLObjectAllValuesFrom(objectProperty, filler);
+            }
+            throw new IllegalArgumentException("Unknown restriction kind: " + kind);
+        }
+        if (property instanceof OWLDataProperty dataProperty) {
+            OWLDataRange filler = dataRange(tree.get("filler"));
+            if ("some".equals(kind)) {
+                return dataFactory.getOWLDataSomeValuesFrom(dataProperty, filler);
+            }
+            if ("only".equals(kind)) {
+                return dataFactory.getOWLDataAllValuesFrom(dataProperty, filler);
+            }
+            throw new IllegalArgumentException("Unknown restriction kind: " + kind);
+        }
+        throw new IllegalArgumentException("Restrictions apply to object or data properties");
+    }
+
+    private OWLClassExpression cardinalityRestriction(Map<String, Object> tree, String kind) {
+        int cardinality = cardinality(tree.get("cardinality"));
+        OWLEntity property = propertyOf(tree);
+        boolean qualified = tree.containsKey("filler") && tree.get("filler") != null;
+        if (property instanceof OWLObjectProperty objectProperty) {
+            if (!qualified) {
+                return switch (kind) {
+                    case "min" -> dataFactory.getOWLObjectMinCardinality(cardinality, objectProperty);
+                    case "max" -> dataFactory.getOWLObjectMaxCardinality(cardinality, objectProperty);
+                    case "exactly" -> dataFactory.getOWLObjectExactCardinality(cardinality, objectProperty);
+                    default -> throw new IllegalArgumentException("Unknown cardinality kind: " + kind);
+                };
+            }
+            OWLClassExpression filler = classExpression(tree.get("filler"), "filler");
+            return switch (kind) {
+                case "min" -> dataFactory.getOWLObjectMinCardinality(cardinality, objectProperty, filler);
+                case "max" -> dataFactory.getOWLObjectMaxCardinality(cardinality, objectProperty, filler);
+                case "exactly" -> dataFactory.getOWLObjectExactCardinality(cardinality, objectProperty, filler);
+                default -> throw new IllegalArgumentException("Unknown cardinality kind: " + kind);
+            };
+        }
+        if (property instanceof OWLDataProperty dataProperty) {
+            if (!qualified) {
+                return switch (kind) {
+                    case "min" -> dataFactory.getOWLDataMinCardinality(cardinality, dataProperty);
+                    case "max" -> dataFactory.getOWLDataMaxCardinality(cardinality, dataProperty);
+                    case "exactly" -> dataFactory.getOWLDataExactCardinality(cardinality, dataProperty);
+                    default -> throw new IllegalArgumentException("Unknown cardinality kind: " + kind);
+                };
+            }
+            OWLDataRange filler = dataRange(tree.get("filler"));
+            return switch (kind) {
+                case "min" -> dataFactory.getOWLDataMinCardinality(cardinality, dataProperty, filler);
+                case "max" -> dataFactory.getOWLDataMaxCardinality(cardinality, dataProperty, filler);
+                case "exactly" -> dataFactory.getOWLDataExactCardinality(cardinality, dataProperty, filler);
+                default -> throw new IllegalArgumentException("Unknown cardinality kind: " + kind);
+            };
+        }
+        throw new IllegalArgumentException("Restrictions apply to object or data properties");
+    }
+
+    private OWLClassExpression junction(Map<String, Object> tree, boolean intersection) {
+        Object raw = tree.get("operands");
+        if (!(raw instanceof List<?> list) || list.size() < 2) {
+            throw new IllegalArgumentException("operands must list at least two expressions");
+        }
+        LinkedHashSet<OWLClassExpression> operands = new LinkedHashSet<>();
+        for (Object item : list) {
+            operands.add(classExpression(item, "operands"));
+        }
+        if (operands.size() < 2) {
+            throw new IllegalArgumentException("operands must list at least two expressions");
+        }
+        return intersection
+                ? dataFactory.getOWLObjectIntersectionOf(operands)
+                : dataFactory.getOWLObjectUnionOf(operands);
+    }
+
+    private OWLDataRange dataRange(Object node) {
+        Map<String, Object> tree = object(node, "filler");
+        String kind = text(tree, "kind");
+        if (!"datatype".equals(kind)) {
+            throw new IllegalArgumentException("Data property filler must be a datatype");
+        }
+        String iri = text(tree, "iri");
+        if (iri == null || iri.isBlank()) {
+            iri = text(tree, "name");
+        }
+        if (iri == null || iri.isBlank()) {
+            throw new IllegalArgumentException("Missing datatype");
+        }
+        return dataFactory.getOWLDatatype(IRI.create(datatypeIri(iri)));
+    }
+
+    private static int cardinality(Object value) {
+        if (value instanceof Number number) {
+            int parsed = number.intValue();
+            if (parsed < 0 || parsed != number.doubleValue()) {
+                throw new IllegalArgumentException("Cardinality must be a non-negative integer");
+            }
+            return parsed;
+        }
+        if (value instanceof String text) {
+            try {
+                int parsed = Integer.parseInt(text.trim());
+                if (parsed < 0) {
+                    throw new IllegalArgumentException("Cardinality must be a non-negative integer");
+                }
+                return parsed;
+            } catch (NumberFormatException error) {
+                throw new IllegalArgumentException("Cardinality must be a non-negative integer");
+            }
+        }
+        throw new IllegalArgumentException("Missing cardinality");
+    }
+
+    private static Map<String, Object> object(Object node, String field) {
+        if (!(node instanceof Map<?, ?> raw)) {
+            throw new IllegalArgumentException(field + " must be an object");
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : raw.entrySet()) {
+            if (!(entry.getKey() instanceof String key)) {
+                throw new IllegalArgumentException(field + " has a non-string key");
+            }
+            result.put(key, entry.getValue());
+        }
+        return result;
     }
 
     private static String datatypeIri(String name) {
