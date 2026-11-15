@@ -33,8 +33,9 @@ public final class Main {
             assistant.close();
         }, "engine-shutdown"));
         Javalin app = createApp(workspace, token, assistant);
-        app.start("127.0.0.1", port);
-        assistant.setEndpoint("http://127.0.0.1:" + app.port(), token);
+        String bind = bindAddress();
+        app.start(bind, port);
+        assistant.setEndpoint("http://" + endpointHost(bind) + ":" + app.port(), token);
         if (java.util.Arrays.asList(args).contains("--watch-parent")) {
             watchParent();
         }
@@ -55,6 +56,7 @@ public final class Main {
             config.jsonMapper(new JavalinJackson());
         });
 
+        KeycloakAuth keycloak = new KeycloakAuth();
         app.before(ctx -> {
             // The desktop webview and the Vite dev server are local origins only.
             String origin = ctx.header("Origin");
@@ -62,9 +64,16 @@ public final class Main {
                 ctx.header("Access-Control-Allow-Origin", origin);
                 ctx.header("Vary", "Origin");
             }
-            ctx.header("Access-Control-Allow-Headers", "X-Engine-Token, Content-Type");
+            ctx.header("Access-Control-Allow-Headers", "Authorization, X-Engine-Token, Content-Type");
             ctx.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-            if ("OPTIONS".equals(ctx.method().name())) {
+            if ("OPTIONS".equals(ctx.method().name()) || DeveloperDocs.isPublic(ctx)) {
+                return;
+            }
+            if (keycloak.enabled()) {
+                if (isAnonymousUnderKeycloak(ctx)) {
+                    return;
+                }
+                keycloak.requireBearer(ctx);
                 return;
             }
             String provided = ctx.header("X-Engine-Token");
@@ -90,6 +99,8 @@ public final class Main {
         });
 
         app.get("/health", ctx -> ctx.json(Map.of("status", "ok", "version", "0.1.0")));
+        app.get("/openapi.json", ctx -> ctx.json(OpenApiDocument.document()));
+        DeveloperDocs.register(app);
         app.post("/ontology/open", ctx -> workspace.open(requireBody(ctx, OpenRequest.class), ctx));
         app.post("/ontology/new", ctx -> workspace.newOntology(
                 requireBody(ctx, SaveRequest.class).path(), ctx));
@@ -163,6 +174,8 @@ public final class Main {
             AssistantRequest request = requireBody(ctx, AssistantRequest.class);
             assistant.answer(request.question(), request.entityIri(), ctx);
         });
+        SystemOneClient systemOne = new SystemOneClient();
+        app.post("/systemone/submit", systemOne::submit);
         app.get("/graph", ctx -> workspace.graph(
                 ctx.queryParam("root"),
                 parseDepth(ctx.queryParam("depth")),
@@ -171,7 +184,36 @@ public final class Main {
         app.post("/reasoner/start", workspace::startReasoner);
         app.post("/reasoner/stop", workspace::stopReasoner);
         app.get("/reasoner/status", workspace::reasonerStatus);
+        app.get("/connectors/mappings", ctx -> workspace.connectors().listMappings(ctx));
+        app.get("/connectors/apps", ctx -> workspace.connectors().listApps(ctx));
+        app.get("/connectors/connections", ctx -> workspace.connectors().listConnections(ctx));
+        app.get("/connectors/actions", ctx -> workspace.connectors().listActions(ctx));
+        app.post("/connectors/mapping/preview", ctx -> {
+            ConnectorMappingRequest request = requireBody(ctx, ConnectorMappingRequest.class);
+            workspace.connectors().previewMapping(request.toService(), ctx);
+        });
+        app.post("/connectors/mapping/commit", ctx -> {
+            ConnectorMappingRequest request = requireBody(ctx, ConnectorMappingRequest.class);
+            workspace.connectors().commitMapping(request.toService(), ctx);
+        });
         return app;
+    }
+
+    public record ConnectorMappingRequest(
+            String connectionName,
+            String service,
+            String actionId,
+            String classIri,
+            String newClassName,
+            String idField,
+            java.util.Map<String, String> fieldMap,
+            java.util.Map<String, Object> actionInput,
+            Integer sampleLimit) {
+        studio.onto.engine.connector.ConnectorService.MappingRequest toService() {
+            return new studio.onto.engine.connector.ConnectorService.MappingRequest(
+                    connectionName, service, actionId, classIri, newClassName, idField, fieldMap,
+                    actionInput, sampleLimit);
+        }
     }
 
     public record OpenRequest(String path) {
@@ -192,7 +234,11 @@ public final class Main {
     public record AssistantRequest(String question, String entityIri) {
     }
 
-    public record ActionRequest(String action, Map<String, String> params, String reason) {
+    /**
+     * {@code params} values are strings for the original actions. Structured
+     * axioms also send numbers, arrays, and objects (class-expression trees).
+     */
+    public record ActionRequest(String action, Map<String, Object> params, String reason) {
     }
 
     public record BranchRequest(String name, String reason) {
@@ -230,6 +276,14 @@ public final class Main {
         }, "parent-watch");
         watcher.setDaemon(true);
         watcher.start();
+    }
+
+    private static boolean isAnonymousUnderKeycloak(Context ctx) {
+        if (!"GET".equals(ctx.method().name())) {
+            return false;
+        }
+        String path = ctx.path();
+        return "/health".equals(path) || "/openapi.json".equals(path);
     }
 
     static boolean isAllowedOrigin(String origin) {
@@ -295,6 +349,30 @@ public final class Main {
         } catch (NumberFormatException error) {
             throw new IllegalArgumentException("Invalid depth: " + raw);
         }
+    }
+
+    /**
+     * Listen address. Unset or blank {@code ENGINE_BIND} stays on 127.0.0.1.
+     * Compose sets {@code ENGINE_BIND=0.0.0.0} so a published port can reach
+     * the process. The request token is unchanged.
+     */
+    static String bindAddress() {
+        return bindAddress(System.getenv("ENGINE_BIND"));
+    }
+
+    static String bindAddress(String configured) {
+        if (configured == null || configured.isBlank()) {
+            return "127.0.0.1";
+        }
+        return configured.trim();
+    }
+
+    /** Loopback is the client address when the process listens on every interface. */
+    static String endpointHost(String bind) {
+        if ("0.0.0.0".equals(bind) || "::".equals(bind) || "[::]".equals(bind)) {
+            return "127.0.0.1";
+        }
+        return bind;
     }
 
     private static int intArg(String[] args, String name, int fallback) {

@@ -4,7 +4,12 @@ target/
 *.log
 .DS_Store
 .playwright-mcp/
+playwright-report/
+test-results/
+blob-report/
 .cursor/
+AGENTS.md
+.agents/
 apps/desktop/src-tauri/gen/
 apps/desktop/src-tauri/resources/
 .env.local

@@ -8,12 +8,30 @@ import App from "./App";
 import ErrorBoundary from "./ErrorBoundary";
 import "./styles.css";
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <Theme theme={themes[defaultThemeSlug]}>
-      <ErrorBoundary name="Application">
-        <App />
-      </ErrorBoundary>
-    </Theme>
-  </StrictMode>,
-);
+const rootElement = document.getElementById("root");
+if (!rootElement) {
+  throw new Error("Missing root element");
+}
+
+const portalRoute = window.location.pathname.replace(/\/+$/, "") || "/";
+if (portalRoute === "/portal") {
+  void import("./portal/PortalPage").then(({ PortalPage }) => {
+    createRoot(rootElement).render(
+      <StrictMode>
+        <Theme theme={themes[defaultThemeSlug]}>
+          <PortalPage />
+        </Theme>
+      </StrictMode>,
+    );
+  });
+} else {
+  createRoot(rootElement).render(
+    <StrictMode>
+      <Theme theme={themes[defaultThemeSlug]}>
+        <ErrorBoundary name="Application">
+          <App />
+        </ErrorBoundary>
+      </Theme>
+    </StrictMode>,
+  );
+}

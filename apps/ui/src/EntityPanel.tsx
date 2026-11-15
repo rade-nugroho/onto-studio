@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import ModalDialog from "./ModalDialog";
 import {
   api,
   isAbortError,
@@ -38,6 +39,11 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
     error?: string;
   } | null>(null);
   const [audit, setAudit] = useState<AuditRow[]>([]);
+  const [pluginPrompt, setPluginPrompt] = useState<{
+    name: string;
+    description: string;
+    params: Record<string, string>;
+  } | null>(null);
   const superAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => () => superAbortRef.current?.abort(), []);
@@ -461,18 +467,12 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
                 disabled={busy}
                 title={action.description}
                 onClick={() => {
-                  const params: Record<string, string> = { iri: entity.iri };
-                  for (const key of Object.keys(action.params)) {
-                    if (key === "iri") {
-                      continue;
-                    }
-                    const value = window.prompt(action.params[key] || key);
-                    if (value === null) {
-                      return;
-                    }
-                    params[key] = value;
+                  const extraKeys = Object.keys(action.params).filter((key) => key !== "iri");
+                  if (extraKeys.length === 0) {
+                    previewPending(action.name, { iri: entity.iri });
+                  } else {
+                    setPluginPrompt(action);
                   }
-                  previewPending(action.name, params);
                 }}
               >
                 {action.name}
@@ -536,6 +536,32 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
           </button>
         </div>
       </Section>
+      <ModalDialog
+        open={pluginPrompt !== null}
+        title={pluginPrompt ? `Action: ${pluginPrompt.name}` : ""}
+        description={pluginPrompt?.description}
+        fields={
+          pluginPrompt
+            ? Object.entries(pluginPrompt.params)
+                .filter(([key]) => key !== "iri")
+                .map(([key, label]) => ({
+                  key,
+                  label: label || key,
+                  required: true,
+                }))
+            : []
+        }
+        confirmLabel="Preview"
+        onConfirm={(values) => {
+          if (!pluginPrompt) {
+            return;
+          }
+          const actionName = pluginPrompt.name;
+          setPluginPrompt(null);
+          previewPending(actionName, { iri: entity.iri, ...values });
+        }}
+        onCancel={() => setPluginPrompt(null)}
+      />
     </>
   );
 }

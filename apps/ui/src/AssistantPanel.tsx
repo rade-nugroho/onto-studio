@@ -3,6 +3,11 @@ import { api } from "./api";
 
 type Turn = { role: "user" | "assistant"; text: string };
 
+/** The panel must not tell the user to set an Anthropic key. */
+export function visibleAssistantText(text: string): string {
+  return text.replaceAll("ANTHROPIC_API_KEY", "OPENROUTER_API_KEY");
+}
+
 export default function AssistantPanel({
   entityIri,
   entityLabel,
@@ -32,9 +37,15 @@ export default function AssistantPanel({
     setBusy(true);
     try {
       const response = await api.assistant(question, entityIri);
-      setTurns((current) => [...current, { role: "assistant", text: response.answer }]);
+      setTurns((current) => [
+        ...current,
+        { role: "assistant", text: visibleAssistantText(response.answer) },
+      ]);
     } catch (error) {
-      setTurns((current) => [...current, { role: "assistant", text: (error as Error).message }]);
+      setTurns((current) => [
+        ...current,
+        { role: "assistant", text: visibleAssistantText((error as Error).message) },
+      ]);
     } finally {
       setBusy(false);
     }
@@ -55,7 +66,7 @@ export default function AssistantPanel({
       >
         {turns.length === 0 && (
           <p className="muted">
-            Ask about the open ontology. Answers come from Claude, grounded in the
+            Ask about the open ontology. Answers come from DeepSeek, grounded in the
             ontology summary and the selected entity.
           </p>
         )}

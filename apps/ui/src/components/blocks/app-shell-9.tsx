@@ -67,7 +67,6 @@ function useScrollFade<T extends HTMLElement>() {
 }
 
 const canvas = "bg-white dark:bg-neutral-950";
-const pageFog = "bg-neutral-50 dark:bg-neutral-950";
 const paper = "bg-white dark:bg-neutral-900";
 const hoverFill = "hover:bg-neutral-900/5 dark:hover:bg-neutral-100/5";
 const thumbLift =
@@ -957,33 +956,8 @@ export default function AppShell9({
         "relative flex h-full min-h-0 w-full overflow-hidden",
       )}
     >
-      <div className={cx(pageFog, "flex h-full w-full min-w-0 p-3")}>
-        <aside
-          {...(!sidebarOpen ? ({ inert: "" } as Record<string, unknown>) : {})}
-          className={cx(
-            "shrink-0",
-            sidebarOpen ? `mr-3 ${sidebarWidth}` : "mr-0 w-0 overflow-hidden",
-          )}
-        >
-          <div className={cx(frame, `h-full ${sidebarWidth}`, sidebarWidth === "w-14" && "shell-rail")}>
-            {sidebar ?? (
-              <SidebarBody
-                model={model}
-                onModel={setModel}
-                chatId={chatId}
-                onChat={openChat}
-                onNew={startNew}
-                collapseRef={collapseRef}
-                onCollapse={() => {
-                  railFocusRef.current = true;
-                  setSidebarOpen(false);
-                }}
-              />
-            )}
-          </div>
-        </aside>
-
-        <div className={cx(frame, "flex min-w-0 flex-1 flex-col")}>
+      <div className={cx(canvas, "grid h-full min-h-0 w-full min-w-0 grid-cols-[auto_minmax(0,1fr)]")}>
+        <div className={cx(frame, "shell-main", "col-start-2 row-start-1 flex min-h-0 min-w-0 flex-col")}>
           {children ?? (
           <>
           <header className="flex h-[60px] shrink-0 items-center px-3">
@@ -1206,6 +1180,30 @@ export default function AppShell9({
           </>
           )}
         </div>
+        <aside
+          {...(!sidebarOpen ? ({ inert: "" } as Record<string, unknown>) : {})}
+          className={cx(
+            "col-start-1 row-start-1 h-full min-h-0",
+            sidebarOpen ? sidebarWidth : "w-0 overflow-hidden",
+          )}
+        >
+          <div className={cx(frame, "shell-rail", "h-full", sidebarWidth)}>
+            {sidebar ?? (
+              <SidebarBody
+                model={model}
+                onModel={setModel}
+                chatId={chatId}
+                onChat={openChat}
+                onNew={startNew}
+                collapseRef={collapseRef}
+                onCollapse={() => {
+                  railFocusRef.current = true;
+                  setSidebarOpen(false);
+                }}
+              />
+            )}
+          </div>
+        </aside>
       </div>
 
       {navOpen && (

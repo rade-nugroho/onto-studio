@@ -12,16 +12,8 @@ import {
 } from "react";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import {
-  CalendarClockIcon,
-  Clock01Icon,
   CornerDownLeftIcon,
-  DashboardSquare01Icon,
-  File02Icon,
-  Key01Icon,
   Search01Icon,
-  Settings02Icon,
-  UserAdd01Icon,
-  UsersIcon,
 } from "@hugeicons/core-free-icons";
 
 const cx = (...c: (string | false | null | undefined)[]) =>
@@ -101,85 +93,6 @@ export type Command = {
   icon: IconSvgElement;
 };
 
-const COMMANDS: Command[] = [
-  {
-    id: "recent-readiness",
-    group: "Recent",
-    title: "Launch readiness review",
-    detail: "Opened 6 minutes ago",
-    shortcut: "1",
-    icon: Clock01Icon,
-  },
-  {
-    id: "recent-incident",
-    group: "Recent",
-    title: "Incident 4821, checkout latency",
-    detail: "Opened yesterday",
-    shortcut: "2",
-    icon: Clock01Icon,
-  },
-  {
-    id: "recent-roadmap",
-    group: "Recent",
-    title: "Q3 roadmap draft",
-    detail: "Opened 2 days ago",
-    shortcut: "3",
-    icon: Clock01Icon,
-  },
-  {
-    id: "go-overview",
-    group: "Navigation",
-    title: "Release overview",
-    shortcut: "G O",
-    icon: DashboardSquare01Icon,
-  },
-  {
-    id: "go-docs",
-    group: "Navigation",
-    title: "Runbooks and docs",
-    shortcut: "G D",
-    icon: File02Icon,
-  },
-  {
-    id: "go-people",
-    group: "Navigation",
-    title: "Team directory",
-    shortcut: "G P",
-    icon: UsersIcon,
-  },
-  {
-    id: "go-settings",
-    group: "Navigation",
-    title: "Workspace settings",
-    shortcut: "G S",
-    icon: Settings02Icon,
-  },
-  {
-    id: "do-invite",
-    group: "Actions",
-    title: "Invite a teammate",
-    detail: "Send a workspace invite by email",
-    shortcut: "I",
-    icon: UserAdd01Icon,
-  },
-  {
-    id: "do-schedule",
-    group: "Actions",
-    title: "Schedule a launch review",
-    detail: "Hold a slot with product and infra",
-    shortcut: "S",
-    icon: CalendarClockIcon,
-  },
-  {
-    id: "do-rotate",
-    group: "Actions",
-    title: "Rotate an API key",
-    detail: "Retire a key and issue a replacement",
-    shortcut: "R",
-    icon: Key01Icon,
-  },
-];
-
 const EXIT_MS = 140;
 
 const FADE_PX = 32;
@@ -210,7 +123,7 @@ export default function CommandMenu1({
   defaultOpen?: boolean;
   compact?: boolean;
 } = {}) {
-  const items = commands ?? COMMANDS;
+  const items = commands ?? [];
   const uid = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);

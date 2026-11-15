@@ -12,15 +12,18 @@ import {
 } from "./api";
 import EntityPanel from "./EntityPanel";
 import ErrorBoundary from "./ErrorBoundary";
+import ModalDialog, { type DialogField } from "./ModalDialog";
 import AppShell9 from "@/components/blocks/app-shell-9";
 import CommandMenu1, { type Command } from "@/components/blocks/command-menu-1";
 import AppSidebar2 from "@/components/blocks/app-sidebar-2";
 
 import AssistantPanel from "./AssistantPanel";
+import { OntologyIdePage } from "./app/ide";
 import {
   ArrowDown01Icon,
   CheckListIcon,
   File02Icon,
+  FlowConnectionIcon,
   LayoutTemplateIcon,
   Search01Icon,
   SparklesIcon,
@@ -44,6 +47,10 @@ export function shouldIgnoreGlobalShortcut(event: KeyboardEvent): boolean {
 
 type ChildrenByIri = Record<string, TreeNode[]>;
 
+function isIdleOntologyMessage(message: string): boolean {
+  return message.replace(/\.$/, "").trim() === "No ontology is open";
+}
+
 export default function App() {
   const [ontology, setOntology] = useState<OntologyInfo | null>(null);
   const [children, setChildren] = useState<ChildrenByIri>({});
@@ -54,6 +61,7 @@ export default function App() {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [view, setView] = useState<"tree" | "graph">("tree");
   const [assistantOpen, setAssistantOpen] = useState(false);
+  const [connectorsOpen, setConnectorsOpen] = useState(false);
   const [depth, setDepth] = useState(2);
   const [dirty, setDirty] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
@@ -68,8 +76,33 @@ export default function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const [treeLoading, setTreeLoading] = useState(false);
   const [entityLoading, setEntityLoading] = useState(false);
+  const [dialogState, setDialogState] = useState<{
+    title: string;
+    description?: string;
+    fields?: DialogField[];
+    confirmLabel?: string;
+    destructive?: boolean;
+    resolve: (values: Record<string, string> | null) => void;
+  } | null>(null);
   const searchAbortRef = useRef<AbortController | null>(null);
   const selectAbortRef = useRef<AbortController | null>(null);
+
+  const openDialog = useCallback(
+    (opts: {
+      title: string;
+      description?: string;
+      fields?: DialogField[];
+      confirmLabel?: string;
+      destructive?: boolean;
+    }): Promise<Record<string, string> | null> =>
+      new Promise((resolve) => {
+        setDialogState((prev) => {
+          prev?.resolve(null);
+          return { ...opts, resolve };
+        });
+      }),
+    [],
+  );
 
   useEffect(() => {
     return () => {
@@ -114,16 +147,29 @@ export default function App() {
   useEffect(() => {
     const controller = new AbortController();
     loadChildren(undefined, controller.signal).catch((e: unknown) => {
-      if (!isAbortError(e)) {
-        setError(e instanceof Error ? e.message : String(e));
+      if (isAbortError(e)) {
+        return;
       }
+      const message = e instanceof Error ? e.message : String(e);
+      if (isIdleOntologyMessage(message)) {
+        return;
+      }
+      setError(message);
     });
     return () => controller.abort();
   }, [loadChildren]);
 
   const openFile = useCallback(async () => {
-    if (dirty && !window.confirm("You have unsaved changes. Discard them and open another ontology?")) {
-      return;
+    if (dirty) {
+      const confirmed = await openDialog({
+        title: "Discard unsaved changes?",
+        description: "You have unsaved changes. Discard them and open another ontology?",
+        confirmLabel: "Discard & Open",
+        destructive: true,
+      });
+      if (!confirmed) {
+        return;
+      }
     }
     setError(null);
     setNotice(null);
@@ -138,10 +184,20 @@ export default function App() {
             filters: [{ name: "Ontology", extensions: ["owl", "ttl", "rdf", "xml", "ofn"] }],
           });
         } catch {
-          path = window.prompt("Ontology file path");
+          const res = await openDialog({
+            title: "Open ontology",
+            fields: [{ key: "path", label: "Ontology file path", placeholder: "/path/to/ontology.owl", required: true }],
+            confirmLabel: "Open",
+          });
+          path = res?.path.trim() ?? null;
         }
       } else {
-        path = window.prompt("Ontology file path");
+        const res = await openDialog({
+          title: "Open ontology",
+          fields: [{ key: "path", label: "Ontology file path", placeholder: "/path/to/ontology.owl", required: true }],
+          confirmLabel: "Open",
+        });
+        path = res?.path.trim() ?? null;
       }
       if (typeof path === "string") {
         const info = await api.open(path);
@@ -161,7 +217,7 @@ export default function App() {
     } catch (e) {
       setError((e as Error).message);
     }
-  }, [dirty, loadChildren]);
+  }, [dirty, loadChildren, openDialog]);
 
   const refreshBranches = useCallback(async () => {
     try {
@@ -173,8 +229,16 @@ export default function App() {
 
   const switchBranch = useCallback(
     async (name: string) => {
-      if (dirty && !window.confirm("You have unsaved changes. Discard them and switch branch?")) {
-        return;
+      if (dirty) {
+        const confirmed = await openDialog({
+          title: "Discard unsaved changes?",
+          description: "You have unsaved changes. Discard them and switch branch?",
+          confirmLabel: "Discard & Switch",
+          destructive: true,
+        });
+        if (!confirmed) {
+          return;
+        }
       }
       setError(null);
       try {
@@ -191,11 +255,16 @@ export default function App() {
         setError((e as Error).message);
       }
     },
-    [dirty, loadChildren, refreshBranches],
+    [dirty, loadChildren, openDialog, refreshBranches],
   );
 
   const newBranch = useCallback(async () => {
-    const name = window.prompt("Branch name");
+    const res = await openDialog({
+      title: "New branch",
+      fields: [{ key: "name", label: "Branch name", placeholder: "feature/my-proposal", required: true }],
+      confirmLabel: "Create",
+    });
+    const name = res?.name.trim();
     if (!name) {
       return;
     }
@@ -207,7 +276,7 @@ export default function App() {
     } catch (e) {
       setError((e as Error).message);
     }
-  }, [refreshBranches, switchBranch]);
+  }, [openDialog, refreshBranches, switchBranch]);
 
   const showDiff = useCallback(async () => {
     setError(null);
@@ -219,10 +288,15 @@ export default function App() {
   }, [activeBranch]);
 
   const promote = useCallback(async () => {
-    const reason = window.prompt("Reason for promoting this branch");
-    if (reason === null) {
+    const res = await openDialog({
+      title: `Promote branch "${activeBranch}"`,
+      fields: [{ key: "reason", label: "Reason for promoting this branch", placeholder: "Reviewed and verified" }],
+      confirmLabel: "Promote",
+    });
+    if (res === null) {
       return;
     }
+    const reason = res.reason ?? "";
     setError(null);
     try {
       await api.promoteBranch(activeBranch, reason);
@@ -234,7 +308,7 @@ export default function App() {
     } catch (e) {
       setError((e as Error).message);
     }
-  }, [activeBranch, loadChildren, refreshBranches]);
+  }, [activeBranch, loadChildren, openDialog, refreshBranches]);
 
   const toggle = useCallback(
     async (node: TreeNode) => {
@@ -417,24 +491,6 @@ export default function App() {
     }
   }, []);
 
-  const listKind = useCallback(async (kind: string) => {
-    setQuery("");
-    searchAbortRef.current?.abort();
-    const controller = new AbortController();
-    searchAbortRef.current = controller;
-    setError(null);
-    try {
-      const response = await api.search("", kind, controller.signal);
-      if (!controller.signal.aborted) {
-        setResults(response.results);
-      }
-    } catch (e) {
-      if (!isAbortError(e)) {
-        setError((e as Error).message);
-      }
-    }
-  }, []);
-
   const commands = useMemo<Command[]>(
     () => [
       { id: "open", group: "Ontology", title: "Open ontology…", icon: File02Icon, shortcut: "⌘O" },
@@ -489,21 +545,31 @@ export default function App() {
           setAssistantOpen((open) => !open);
           break;
         case "plugin-install": {
-          const url = window.prompt("Plugin jar URL");
-          if (!url) {
-            break;
-          }
-          const sha256 = window.prompt("SHA-256 of the jar (pinned)");
-          if (!sha256) {
-            break;
-          }
-          api
-            .installPlugin(url, sha256)
-            .then((result) => {
-              setError(null);
-              setNotice(`Installed ${result.installed} (${result.plugins} plugins loaded)`);
-            })
-            .catch((e: Error) => setError(e.message));
+          void openDialog({
+            title: "Install plugin",
+            description: "Provide the plugin JAR URL and its pinned SHA-256 digest.",
+            fields: [
+              { key: "url", label: "Plugin jar URL", placeholder: "https://example.com/plugin.jar", required: true },
+              { key: "sha256", label: "SHA-256 of the jar (pinned)", placeholder: "64-char hex digest", required: true },
+            ],
+            confirmLabel: "Install",
+          }).then((res) => {
+            if (!res) {
+              return;
+            }
+            const url = res.url.trim();
+            const sha256 = res.sha256.trim();
+            if (!url || !sha256) {
+              return;
+            }
+            api
+              .installPlugin(url, sha256)
+              .then((result) => {
+                setError(null);
+                setNotice(`Installed ${result.installed} (${result.plugins} plugins loaded)`);
+              })
+              .catch((e: Error) => setError(e.message));
+          });
           break;
         }
         case "search":
@@ -513,7 +579,7 @@ export default function App() {
           break;
       }
     },
-    [openFile, redo, save, toggleReasoner, undo],
+    [openDialog, openFile, redo, save, toggleReasoner, undo],
   );
 
   const roots = useMemo(() => children["root"] ?? [], [children]);
@@ -526,46 +592,29 @@ export default function App() {
       sidebar={
         <AppSidebar2
           brand="O"
-          groups={[
-            [
-              { label: "Classes", icon: LayoutTemplateIcon, children: ["All classes", "Top level"] },
-              { label: "Properties", icon: Search01Icon, children: ["Object properties", "Data properties", "Annotation properties"] },
-            ],
-            [
-              { label: "Individuals", icon: SparklesIcon, children: ["All individuals", "By class"] },
-              { label: "Reasoner", icon: ArrowDown01Icon, children: ["Start", "Stop"] },
-            ],
+          items={[
+            { label: "Ontology", icon: LayoutTemplateIcon, current: true, title: "Ontology" },
+            { label: "Search", icon: Search01Icon, title: "Search hierarchy" },
+            { label: "Connectors", icon: FlowConnectionIcon, title: "Connectors" },
+            { label: "Assistant", icon: SparklesIcon, title: "Assistant" },
           ]}
-          onSelect={(group, item) => {
-            if (group === "Reasoner") {
-              if ((item === "Start") !== reasoning) {
-                toggleReasoner();
-              }
-              return;
-            }
-            if (group === "Classes") {
-              setResults([]);
-              setQuery("");
+          onNavigate={(label) => {
+            if (label === "Ontology") {
               setView("tree");
+              setConnectorsOpen(false);
               return;
             }
-            if (group === "Properties") {
-              listKind(
-                item === "Object properties"
-                  ? "object property"
-                  : item === "Data properties"
-                    ? "data property"
-                    : "annotation property",
-              );
+            if (label === "Search") {
+              document.getElementById("hierarchy-filter")?.focus();
               return;
             }
-            if (item === "All individuals") {
-              listKind("individual");
+            if (label === "Connectors") {
+              setConnectorsOpen(true);
               return;
             }
-            setResults([]);
-            setQuery("");
-            setView("tree");
+            if (label === "Assistant") {
+              setAssistantOpen(true);
+            }
           }}
         />
       }
@@ -621,6 +670,7 @@ export default function App() {
           </span>
         )}
         <button
+          type="button"
           className={assistantOpen ? "active-toggle" : ""}
           onClick={() => setAssistantOpen((open) => !open)}
           aria-pressed={assistantOpen}
@@ -677,98 +727,102 @@ export default function App() {
         </div>
       )}
 
-      {results.length > 0 && (
-        <div className="results">
-          {results.map((result) => (
-            <button key={result.iri} className="result" onClick={() => select(result.iri)}>
-              <span className="kind">{result.kind}</span>
-              {result.label}
-            </button>
-          ))}
-        </div>
-      )}
-
-      <main
-        className={view === "graph" ? "panes graph" : "panes"}
-        style={
-          assistantOpen
-            ? {
-                gridTemplateColumns:
-                  view === "graph" ? "minmax(0, 1fr) 320px 340px" : "300px minmax(0, 1fr) 340px",
-              }
-            : undefined
-        }
-      >
-        {view === "graph" ? (
-          <div className="canvas">
-            <ErrorBoundary name="Graph" onReset={() => setVersion((v) => v + 1)}>
-              <Suspense fallback={<div className="empty">Loading graph…</div>}>
-                <GraphView
-                  depth={depth}
-                  version={version}
-                  inferred={reasoning}
-                  selected={selected}
+      <main className="workbench">
+        <OntologyIdePage
+          selectedIri={selected}
+          onEdited={onEdited}
+          searchValue={query}
+          onSearchChange={runSearch}
+          hierarchy={
+            <>
+              {results.length > 0 && (
+                <div className="results">
+                  {results.map((result) => (
+                    <button key={result.iri} className="result" onClick={() => select(result.iri)}>
+                      <span className="kind">{result.kind}</span>
+                      {result.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <aside className="tree" role="tree" aria-label="Class hierarchy">
+                {treeLoading && roots.length === 0 && <div className="empty">Loading classes…</div>}
+                {!treeLoading && roots.length === 0 && ontology && (
+                  <div className="empty">No classes in ontology</div>
+                )}
+                {!treeLoading && roots.length === 0 && !ontology && (
+                  <div className="empty empty-cta">
+                    <p>Open an ontology to browse classes.</p>
+                    <button type="button" onClick={openFile}>
+                      Open ontology…
+                    </button>
+                  </div>
+                )}
+                {roots.map((node) => (
+                  <TreeItem
+                    key={node.iri}
+                    node={node}
+                    depth={0}
+                    childrenByIri={children}
+                    expanded={expanded}
+                    selected={selected}
+                    onToggle={toggle}
+                    onSelect={select}
+                  />
+                ))}
+              </aside>
+            </>
+          }
+          editor={
+            view === "graph" ? (
+              <div className="canvas">
+                <ErrorBoundary name="Graph" onReset={() => setVersion((v) => v + 1)}>
+                  <Suspense fallback={<div className="empty">Loading graph…</div>}>
+                    <GraphView
+                      depth={depth}
+                      version={version}
+                      inferred={reasoning}
+                      selected={selected}
+                      onSelect={select}
+                      onError={setError}
+                    />
+                  </Suspense>
+                </ErrorBoundary>
+              </div>
+            ) : undefined
+          }
+          inspector={
+            entityLoading && !entity ? (
+              <p className="empty">Loading entity…</p>
+            ) : entity ? (
+              <ErrorBoundary key={entity.iri + version} name="Entity details">
+                <EntityPanel
+                  key={entity.iri + version}
+                  entity={entity}
+                  onEdited={onEdited}
                   onSelect={select}
                   onError={setError}
                 />
-              </Suspense>
-            </ErrorBoundary>
-          </div>
-        ) : (
-          <aside className="tree" role="tree" aria-label="Class hierarchy">
-            {treeLoading && roots.length === 0 && <div className="empty">Loading classes…</div>}
-            {!treeLoading && roots.length === 0 && ontology && (
-              <div className="empty">No classes in ontology</div>
-            )}
-            {!treeLoading && roots.length === 0 && !ontology && (
-              <div className="empty empty-cta">
-                <p>No ontology open</p>
-                <button onClick={openFile}>Open ontology…</button>
+              </ErrorBoundary>
+            ) : undefined
+          }
+          connectorsOpen={connectorsOpen}
+          onConnectorsOpenChange={setConnectorsOpen}
+          assistant={
+            assistantOpen ? (
+              <div className="assistant">
+                <AssistantPanel entityIri={selected} entityLabel={entity?.label ?? null} />
               </div>
-            )}
-            {roots.map((node) => (
-              <TreeItem
-                key={node.iri}
-                node={node}
-                depth={0}
-                childrenByIri={children}
-                expanded={expanded}
-                selected={selected}
-                onToggle={toggle}
-                onSelect={select}
-              />
-            ))}
-          </aside>
-        )}
-
-        <section className="detail">
-          {entityLoading && !entity && <div className="empty">Loading entity…</div>}
-          {!entityLoading && !entity && (
-            <div className="empty empty-cta">
-              <p>Select a class to see its axioms</p>
-              <button onClick={openFile}>Open ontology…</button>
-            </div>
-          )}
-          {entity && (
-            <ErrorBoundary key={entity.iri + version} name="Entity details">
-              <EntityPanel
-                key={entity.iri + version}
-                entity={entity}
-                onEdited={onEdited}
-                onSelect={select}
-                onError={setError}
-              />
-            </ErrorBoundary>
-          )}
-        </section>
-
-        {assistantOpen && (
-          <aside className="assistant">
-            <AssistantPanel entityIri={selected} entityLabel={entity?.label ?? null} />
-          </aside>
-        )}
+            ) : undefined
+          }
+        />
       </main>
 
+      {!ontology && !error && (
+        <div className="status" role="status">
+          <span>No ontology open</span>
+        </div>
+      )}
       {notice && (
         <div className="notice" role="status">
           <span>{notice}</span>
@@ -785,6 +839,24 @@ export default function App() {
           </button>
         </div>
       )}
+      <ModalDialog
+        open={dialogState !== null}
+        title={dialogState?.title ?? ""}
+        description={dialogState?.description}
+        fields={dialogState?.fields}
+        confirmLabel={dialogState?.confirmLabel}
+        destructive={dialogState?.destructive}
+        onConfirm={(values) => {
+          const resolve = dialogState?.resolve;
+          setDialogState(null);
+          resolve?.(values);
+        }}
+        onCancel={() => {
+          const resolve = dialogState?.resolve;
+          setDialogState(null);
+          resolve?.(null);
+        }}
+      />
     </div>
     </AppShell9>
   );

@@ -1,0 +1,16 @@
+.git
+.github
+**/.env
+**/.env.*
+.env
+.env.local
+**/node_modules
+**/target
+**/dist
+**/.onto-studio
+apps/desktop/src-tauri/target
+apps/desktop/src-tauri/gen
+**/*.log
+.DS_Store
+.cursor
+.playwright-mcp
