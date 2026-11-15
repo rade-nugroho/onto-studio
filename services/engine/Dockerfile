@@ -21,7 +21,7 @@ RUN mvn -B -Dmaven.test.skip=true package \
 
 FROM gcr.io/distroless/java21-debian12:nonroot@sha256:7e37784d94dccbf5ccb195c73b295f5ad00cd266512dfbac12eb9c3c28f8077d
 
-LABEL org.opencontainers.image.source="https://github.com/rade-nugroho/protege" \
+LABEL org.opencontainers.image.source="https://github.com/rade-nugroho/onto-studio" \
       org.opencontainers.image.title="onto-studio-engine" \
       org.opencontainers.image.description="Onto Studio ontology engine"
 

@@ -575,6 +575,19 @@ class EngineApiTest {
     }
 
     @Test
+    void bindDefaultsToLoopbackUnlessComposeSetsEveryInterface() {
+        assertEquals("127.0.0.1", Main.bindAddress(null));
+        assertEquals("127.0.0.1", Main.bindAddress(""));
+        assertEquals("127.0.0.1", Main.bindAddress("  "));
+        assertEquals("127.0.0.1", Main.bindAddress(" 127.0.0.1 "));
+        assertEquals("0.0.0.0", Main.bindAddress("0.0.0.0"));
+        assertEquals("127.0.0.1", Main.endpointHost("0.0.0.0"));
+        assertEquals("127.0.0.1", Main.endpointHost("::"));
+        assertEquals("127.0.0.1", Main.endpointHost("[::]"));
+        assertEquals("127.0.0.1", Main.endpointHost("127.0.0.1"));
+    }
+
+    @Test
     void corsAllowsLocalOriginsAndRejectsExternalOrigins() {
         assertTrue(Main.isAllowedOrigin("http://localhost:5173"));
         assertTrue(Main.isAllowedOrigin("http://127.0.0.1:4173"));

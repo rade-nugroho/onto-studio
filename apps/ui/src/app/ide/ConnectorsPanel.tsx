@@ -180,8 +180,15 @@ export function ConnectorsPanel({ onClose }: { onClose?: () => void }) {
             <Button type="button" variant="ghost" label="Back to editor" onClick={onClose} />
           ) : null}
         </Stack>
-        <Text tone="muted">Browse OpenConnector providers and map read actions to OWL classes.</Text>
-        <SegmentedControl value={mode} onChange={(value) => setMode(value as BrowseMode)} size="sm">
+        <Text type="supporting" display="block">
+          Browse OpenConnector providers and map read actions to OWL classes.
+        </Text>
+        <SegmentedControl
+          label="Connector list"
+          value={mode}
+          onChange={(value) => setMode(value as BrowseMode)}
+          size="sm"
+        >
           <SegmentedControlItem label="Yours" value="yours" />
           <SegmentedControlItem label="Discover" value="discover" />
         </SegmentedControl>
@@ -196,7 +203,7 @@ export function ConnectorsPanel({ onClose }: { onClose?: () => void }) {
 
       <StackItem size="fill" isScrollable>
         {loading ? (
-          <Text tone="muted">Loading…</Text>
+          <Text type="supporting" display="block">Loading…</Text>
         ) : browseRows.length === 0 ? (
           <EmptyState
             isCompact
@@ -218,7 +225,7 @@ export function ConnectorsPanel({ onClose }: { onClose?: () => void }) {
                   type="button"
                   variant="ghost"
                   label={connection.service}
-                  description={`${connection.name} · ${connection.authType} · ${
+                  tooltip={`${connection.name} · ${connection.authType} · ${
                     connection.status === "connected" ? "Connected" : "Reconnect"
                   }`}
                   onClick={() => {
@@ -246,7 +253,7 @@ export function ConnectorsPanel({ onClose }: { onClose?: () => void }) {
       {selectedConnection ? (
         <Stack direction="vertical" gap={2} paddingBlockStart={2}>
           <Heading level={3}>Mapper</Heading>
-          <Text tone="muted">
+          <Text type="supporting" display="block">
             {selectedConnection.service} · {selectedConnection.name}
           </Text>
           <Stack direction="vertical" gap={1}>
@@ -256,7 +263,7 @@ export function ConnectorsPanel({ onClose }: { onClose?: () => void }) {
                 type="button"
                 variant="ghost"
                 label={action.id}
-                description={action.description}
+                tooltip={action.description}
                 onClick={() => {
                   setSelectedAction(action);
                   setPreviewLines(null);

@@ -357,7 +357,10 @@ public final class Main {
      * the process. The request token is unchanged.
      */
     static String bindAddress() {
-        String configured = System.getenv("ENGINE_BIND");
+        return bindAddress(System.getenv("ENGINE_BIND"));
+    }
+
+    static String bindAddress(String configured) {
         if (configured == null || configured.isBlank()) {
             return "127.0.0.1";
         }
@@ -365,7 +368,7 @@ public final class Main {
     }
 
     /** Loopback is the client address when the process listens on every interface. */
-    private static String endpointHost(String bind) {
+    static String endpointHost(String bind) {
         if ("0.0.0.0".equals(bind) || "::".equals(bind) || "[::]".equals(bind)) {
             return "127.0.0.1";
         }
