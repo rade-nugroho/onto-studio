@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Background,
   Controls,
@@ -12,7 +12,7 @@ import {
   type Node,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { api, type GraphSlice } from "./api";
+import { api, isAbortError, type GraphSlice } from "./api";
 import { layoutNodes } from "./layout";
 
 type GraphViewProps = {
@@ -38,11 +38,14 @@ function edgesOf(graph: GraphSlice): Edge[] {
 function Canvas({ depth, version, inferred, selected, onSelect, onError }: GraphViewProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
+    setLoading(true);
     api
-      .graph(undefined, depth, inferred)
+      .graph(undefined, depth, inferred, controller.signal)
       .then((graph) => {
         if (cancelled) {
           return;
@@ -50,9 +53,20 @@ function Canvas({ depth, version, inferred, selected, onSelect, onError }: Graph
         setNodes(layoutNodes(graph));
         setEdges(edgesOf(graph));
       })
-      .catch((error: Error) => onError(error.message));
+      .catch((error: unknown) => {
+        if (cancelled || isAbortError(error)) {
+          return;
+        }
+        onError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [depth, inferred, version, onError, setEdges, setNodes]);
 
@@ -72,21 +86,28 @@ function Canvas({ depth, version, inferred, selected, onSelect, onError }: Graph
   );
 
   return (
-    <ReactFlow
-      nodes={styledNodes}
-      edges={edges}
-      onNodesChange={onNodesChange}
-      onEdgesChange={onEdgesChange}
-      onNodeClick={handleClick}
-      fitView
-      fitViewOptions={{ padding: 0.2, maxZoom: 1 }}
-      minZoom={0.2}
-      proOptions={{ hideAttribution: true }}
-    >
-      <Background gap={18} color="#e6e9ee" />
-      <Controls showInteractive={false} />
-      <MiniMap pannable zoomable />
-    </ReactFlow>
+    <div className="graph-wrap">
+      {loading && (
+        <div className="graph-loading" role="status" aria-live="polite">
+          Loading graph…
+        </div>
+      )}
+      <ReactFlow
+        nodes={styledNodes}
+        edges={edges}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+        onNodeClick={handleClick}
+        fitView
+        fitViewOptions={{ padding: 0.2, maxZoom: 1 }}
+        minZoom={0.2}
+        proOptions={{ hideAttribution: true }}
+      >
+        <Background gap={18} color="#e6e9ee" />
+        <Controls showInteractive={false} />
+        <MiniMap pannable zoomable />
+      </ReactFlow>
+    </div>
   );
 }
 

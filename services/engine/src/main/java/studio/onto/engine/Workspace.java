@@ -37,14 +37,23 @@ import org.semanticweb.owlapi.util.OntologyAxiomPair;
 import org.semanticweb.owlapi.util.SimpleShortFormProvider;
 import studio.onto.engine.plugin.Plugin;
 import studio.onto.engine.plugin.PluginLoader;
+import studio.onto.engine.plugin.RemotePlugin;
 
 import java.io.File;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Stream;
@@ -52,9 +61,12 @@ import java.util.stream.Stream;
 /**
  * Holds the active ontology, answers queries, and records edits for undo/redo.
  */
-public final class Workspace implements Plugin.PluginContext {
+public final class Workspace implements Plugin.PluginContext, AutoCloseable {
 
     private static final int SEARCH_LIMIT = 50;
+    private static final HttpClient HTTP = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(10))
+            .build();
 
     private final OWLOntologyManager manager = OWLManager.createOWLOntologyManager();
     private final OWLDataFactory dataFactory = manager.getOWLDataFactory();
@@ -81,10 +93,28 @@ public final class Workspace implements Plugin.PluginContext {
         activeManager = manager;
     }
 
+    @Override
+    public synchronized void close() {
+        stopReasonerInternal();
+        closeRemotePlugins();
+    }
+
+    private void closeRemotePlugins() {
+        for (Plugin plugin : plugins) {
+            if (plugin instanceof RemotePlugin remote) {
+                remote.close();
+            }
+        }
+    }
+
     private record Branch(String name, OWLOntology ontology, OWLOntologyManager manager, String createdAt) {
     }
 
     public synchronized void open(Main.OpenRequest request, Context ctx) {
+        if (request == null || request.path() == null || request.path().isBlank()) {
+            ctx.status(400).json(Map.of("error", "Missing path"));
+            return;
+        }
         File file = new File(request.path());
         if (!file.isFile()) {
             ctx.status(400).json(Map.of("error", "File not found: " + request.path()));
@@ -98,6 +128,21 @@ public final class Workspace implements Plugin.PluginContext {
             ctx.status(400).json(Map.of("error", "Could not open " + file + ": " + error.getMessage()));
             return;
         }
+        initSessionState(file);
+        evidence.record("import", "file", "", List.of(), 0.9, Map.of(
+                "file", file.getAbsolutePath(),
+                "count", ontology.getAxiomCount()));
+        ctx.json(Map.of(
+                "iri", ontology.getOntologyID().getOntologyIRI().map(IRI::toString).orElse(""),
+                "path", file.getAbsolutePath(),
+                "axiomCount", ontology.getAxiomCount(),
+                "entityCount", ontology.getSignature().size(),
+                "dirty", false,
+                "canUndo", false,
+                "canRedo", false));
+    }
+
+    private void initSessionState(File file) {
         stopReasonerInternal();
         openedFile = file;
         mainOntology = ontology;
@@ -107,20 +152,9 @@ public final class Workspace implements Plugin.PluginContext {
         activeBranch = null;
         evidence = new EvidenceStore(EvidenceStore.defaultPath(file.toPath()));
         markings = new MarkingStore(MarkingStore.defaultPath(file.toPath()));
-        evidence.record("import", "file", "", List.of(), 0.9, Map.of(
-                "file", file.getAbsolutePath(),
-                "count", ontology.getAxiomCount()));
         undoStack.clear();
         redoStack.clear();
         savedDepth = 0;
-        ctx.json(Map.of(
-                "iri", ontology.getOntologyID().getOntologyIRI().map(IRI::toString).orElse(""),
-                "path", file.getAbsolutePath(),
-                "axiomCount", ontology.getAxiomCount(),
-                "entityCount", ontology.getSignature().size(),
-                "dirty", false,
-                "canUndo", false,
-                "canRedo", false));
     }
 
     public synchronized String currentPath() {
@@ -140,11 +174,7 @@ public final class Workspace implements Plugin.PluginContext {
             }
             manager.getOntologies().forEach(manager::removeOntology);
             ontology = manager.createOntology(IRI.create(file.toURI()));
-            stopReasonerInternal();
-            openedFile = file;
-            undoStack.clear();
-            redoStack.clear();
-            savedDepth = 0;
+            initSessionState(file);
             manager.saveOntology(ontology, new RDFXMLDocumentFormat(), IRI.create(file));
             ctx.json(Map.of(
                     "iri", ontology.getOntologyID().getOntologyIRI().map(IRI::toString).orElse(""),
@@ -161,6 +191,10 @@ public final class Workspace implements Plugin.PluginContext {
 
     public synchronized void addAxiomsBatch(String text, Context ctx) {
         if (!requireOntology(ctx)) {
+            return;
+        }
+        if (text == null || text.isBlank()) {
+            ctx.status(400).json(Map.of("error", "Missing axiom text"));
             return;
         }
         List<OWLAxiom> axioms;
@@ -186,15 +220,16 @@ public final class Workspace implements Plugin.PluginContext {
             return;
         }
         boolean root = parentIri == null || parentIri.isBlank();
+        IRI parent = root ? null : parseIri(parentIri, "parent");
         Stream<OWLClass> candidates;
         if (inferred && reasoner != null) {
-            OWLClass start = root ? dataFactory.getOWLThing() : dataFactory.getOWLClass(IRI.create(parentIri));
+            OWLClass start = root ? dataFactory.getOWLThing() : dataFactory.getOWLClass(parent);
             candidates = reasoner.getSubClasses(start, true).entities()
                     .filter(entity -> !entity.isOWLNothing());
         } else {
             candidates = root
                     ? ontology.classesInSignature().filter(this::isTopLevel)
-                    : EntitySearcher.getSubClasses(dataFactory.getOWLClass(IRI.create(parentIri)), ontology)
+                    : EntitySearcher.getSubClasses(dataFactory.getOWLClass(parent), ontology)
                             .filter(OWLClassExpression::isNamed)
                             .map(OWLClassExpression::asOWLClass);
         }
@@ -318,7 +353,7 @@ public final class Workspace implements Plugin.PluginContext {
                         queue.add(cls);
                     });
         } else {
-            OWLClass start = dataFactory.getOWLClass(IRI.create(rootIri));
+            OWLClass start = dataFactory.getOWLClass(parseIri(rootIri, "root"));
             depthByIri.put(start.getIRI().toString(), 0);
             queue.add(start);
         }
@@ -392,8 +427,13 @@ public final class Workspace implements Plugin.PluginContext {
         if (!requireOntology(ctx)) {
             return;
         }
-        OWLClass sub = dataFactory.getOWLClass(IRI.create(request.sub()));
-        OWLClass sup = dataFactory.getOWLClass(IRI.create(request.sup()));
+        if (request == null || request.sub() == null || request.sub().isBlank()
+                || request.sup() == null || request.sup().isBlank()) {
+            ctx.status(400).json(Map.of("error", "Both sub and sup IRIs are required"));
+            return;
+        }
+        OWLClass sub = dataFactory.getOWLClass(parseIri(request.sub(), "sub"));
+        OWLClass sup = dataFactory.getOWLClass(parseIri(request.sup(), "sup"));
         apply(List.of(new AddAxiom(ontology, dataFactory.getOWLSubClassOfAxiom(sub, sup))));
         ctx.json(state());
     }
@@ -402,8 +442,13 @@ public final class Workspace implements Plugin.PluginContext {
         if (!requireOntology(ctx)) {
             return;
         }
-        OWLClass sub = dataFactory.getOWLClass(IRI.create(request.sub()));
-        OWLClass sup = dataFactory.getOWLClass(IRI.create(request.sup()));
+        if (request == null || request.sub() == null || request.sub().isBlank()
+                || request.sup() == null || request.sup().isBlank()) {
+            ctx.status(400).json(Map.of("error", "Both sub and sup IRIs are required"));
+            return;
+        }
+        OWLClass sub = dataFactory.getOWLClass(parseIri(request.sub(), "sub"));
+        OWLClass sup = dataFactory.getOWLClass(parseIri(request.sup(), "sup"));
         apply(List.of(new RemoveAxiom(ontology, dataFactory.getOWLSubClassOfAxiom(sub, sup))));
         ctx.json(state());
     }
@@ -414,6 +459,10 @@ public final class Workspace implements Plugin.PluginContext {
      */
     public synchronized void addAxiomText(Main.AxiomTextRequest request, Context ctx) {
         if (!requireOntology(ctx)) {
+            return;
+        }
+        if (request == null || request.text() == null || request.text().isBlank()) {
+            ctx.status(400).json(Map.of("error", "Missing axiom text"));
             return;
         }
         List<OWLAxiom> axioms;
@@ -435,6 +484,10 @@ public final class Workspace implements Plugin.PluginContext {
 
     public synchronized void removeAxiomText(Main.AxiomTextRequest request, Context ctx) {
         if (!requireOntology(ctx)) {
+            return;
+        }
+        if (request == null || request.text() == null || request.text().isBlank()) {
+            ctx.status(400).json(Map.of("error", "Missing axiom text"));
             return;
         }
         List<OWLAxiom> axioms;
@@ -461,6 +514,11 @@ public final class Workspace implements Plugin.PluginContext {
      */
     public synchronized void removeRenderedAxiom(Main.RenderedAxiomRequest request, Context ctx) {
         if (!requireOntology(ctx)) {
+            return;
+        }
+        if (request == null || request.iri() == null || request.iri().isBlank()
+                || request.text() == null || request.text().isBlank()) {
+            ctx.status(400).json(Map.of("error", "Both iri and text are required"));
             return;
         }
         OWLEntity entity = ontology.signature()
@@ -527,7 +585,7 @@ public final class Workspace implements Plugin.PluginContext {
             ctx.status(409).json(Map.of("error", "Switch to main before saving; promote the branch instead"));
             return;
         }
-        File target = request.path() == null || request.path().isBlank()
+        File target = request == null || request.path() == null || request.path().isBlank()
                 ? openedFile
                 : new File(request.path());
         if (target == null) {
@@ -666,6 +724,10 @@ public final class Workspace implements Plugin.PluginContext {
         if (!requireOntology(ctx)) {
             return;
         }
+        if (request == null || request.action() == null || request.action().isBlank()) {
+            ctx.status(400).json(Map.of("error", "Missing action"));
+            return;
+        }
         Plan plan;
         try {
             plan = plan(request);
@@ -683,6 +745,10 @@ public final class Workspace implements Plugin.PluginContext {
         if (!requireOntology(ctx)) {
             return;
         }
+        if (request == null || request.action() == null || request.action().isBlank()) {
+            ctx.status(400).json(Map.of("error", "Missing action"));
+            return;
+        }
         Plan plan;
         try {
             plan = plan(request);
@@ -691,11 +757,13 @@ public final class Workspace implements Plugin.PluginContext {
             return;
         }
         apply(plan.changes, "action:" + plan.name);
-        evidence.record("action", "action:" + plan.name, "", plan.entities, 1.0, Map.of(
-                "actionName", plan.name,
-                "reason", request.reason() == null ? "" : request.reason(),
-                "changes", plan.summary,
-                "params", plan.params));
+        if (evidence != null) {
+            evidence.record("action", "action:" + plan.name, "", plan.entities, 1.0, Map.of(
+                    "actionName", plan.name,
+                    "reason", request.reason() == null ? "" : request.reason(),
+                    "changes", plan.summary,
+                    "params", plan.params));
+        }
         Map<String, Object> response = new LinkedHashMap<>(state());
         response.put("action", plan.name);
         response.put("summary", plan.summary);
@@ -710,7 +778,7 @@ public final class Workspace implements Plugin.PluginContext {
         if (!requireOntology(ctx)) {
             return;
         }
-        String name = request.name() == null ? "" : request.name().trim();
+        String name = request == null || request.name() == null ? "" : request.name().trim();
         if (name.isEmpty()) {
             ctx.status(400).json(Map.of("error", "Missing branch name"));
             return;
@@ -735,7 +803,7 @@ public final class Workspace implements Plugin.PluginContext {
         if (!requireOntology(ctx)) {
             return;
         }
-        String name = request.name() == null ? "" : request.name().trim();
+        String name = request == null || request.name() == null ? "" : request.name().trim();
         if (name.isEmpty() || "main".equals(name)) {
             ontology = mainOntology;
             activeManager = mainManager;
@@ -782,6 +850,10 @@ public final class Workspace implements Plugin.PluginContext {
         if (!requireOntology(ctx)) {
             return;
         }
+        if (name == null || name.isBlank()) {
+            ctx.status(400).json(Map.of("error", "Missing branch name"));
+            return;
+        }
         Branch branch = branches.get(name);
         if (branch == null) {
             ctx.status(404).json(Map.of("error", "Unknown branch: " + name));
@@ -814,7 +886,7 @@ public final class Workspace implements Plugin.PluginContext {
         if (!requireOntology(ctx)) {
             return;
         }
-        String name = request.name() == null ? "" : request.name().trim();
+        String name = request == null || request.name() == null ? "" : request.name().trim();
         Branch branch = branches.get(name);
         if (branch == null) {
             ctx.status(404).json(Map.of("error", "Unknown branch: " + name));
@@ -905,6 +977,10 @@ public final class Workspace implements Plugin.PluginContext {
      * exact artifact it trusts.
      */
     public synchronized void installPlugin(Main.PluginInstallRequest request, Context ctx) {
+        if (request == null) {
+            ctx.status(400).json(Map.of("error", "Missing request body"));
+            return;
+        }
         installFromUrl(request.url(), request.sha256(), ctx);
     }
 
@@ -917,7 +993,9 @@ public final class Workspace implements Plugin.PluginContext {
     }
 
     public synchronized void addCatalogEntry(Main.CatalogEntryRequest request, Context ctx) {
-        if (request.name() == null || request.url() == null || request.sha256() == null) {
+        if (request == null || request.name() == null || request.name().isBlank()
+                || request.url() == null || request.url().isBlank()
+                || request.sha256() == null || request.sha256().isBlank()) {
             ctx.status(400).json(Map.of("error", "name, url and sha256 are required"));
             return;
         }
@@ -930,7 +1008,7 @@ public final class Workspace implements Plugin.PluginContext {
     }
 
     public synchronized void installFromCatalog(Main.CatalogInstallRequest request, Context ctx) {
-        String name = request.name() == null ? "" : request.name().trim();
+        String name = request == null || request.name() == null ? "" : request.name().trim();
         PluginCatalog.Entry entry = catalog.get(name);
         if (entry == null) {
             ctx.status(404).json(Map.of("error", "Unknown catalog entry: " + name));
@@ -948,15 +1026,26 @@ public final class Workspace implements Plugin.PluginContext {
             ctx.status(400).json(Map.of("error", "Both url and sha256 are required"));
             return;
         }
+        URI uri;
+        try {
+            uri = URI.create(url.trim());
+        } catch (IllegalArgumentException error) {
+            ctx.status(400).json(Map.of("error", "Invalid plugin URL: " + error.getMessage()));
+            return;
+        }
+        String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+        if (!"http".equals(scheme) && !"https".equals(scheme)) {
+            ctx.status(400).json(Map.of("error", "Only http and https URLs are supported"));
+            return;
+        }
         byte[] bytes;
         try {
-            var client = java.net.http.HttpClient.newHttpClient();
-            var httpRequest = java.net.http.HttpRequest.newBuilder()
-                    .uri(java.net.URI.create(url))
-                    .timeout(java.time.Duration.ofSeconds(30))
+            HttpRequest httpRequest = HttpRequest.newBuilder()
+                    .uri(uri)
+                    .timeout(Duration.ofSeconds(30))
                     .GET()
                     .build();
-            var response = client.send(httpRequest, java.net.http.HttpResponse.BodyHandlers.ofByteArray());
+            HttpResponse<byte[]> response = HTTP.send(httpRequest, HttpResponse.BodyHandlers.ofByteArray());
             if (response.statusCode() != 200) {
                 ctx.status(400).json(Map.of("error", "Download failed: HTTP " + response.statusCode()));
                 return;
@@ -976,21 +1065,39 @@ public final class Workspace implements Plugin.PluginContext {
                     "expected", sha256Value.trim(), "actual", digest));
             return;
         }
-        String fileName = url.substring(url.lastIndexOf('/') + 1);
-        if (!fileName.endsWith(".jar")) {
-            fileName = "plugin-" + digest.substring(0, 8) + ".jar";
-        }
+        String fileName = safePluginFileName(uri.getPath(), digest);
         try {
-            java.nio.file.Path dir = PluginLoader.pluginsDirectory();
-            java.nio.file.Files.createDirectories(dir);
-            java.nio.file.Path target = dir.resolve(fileName);
-            java.nio.file.Files.write(target, bytes);
+            Path dir = PluginLoader.pluginsDirectory().toAbsolutePath().normalize();
+            Files.createDirectories(dir);
+            Path target = dir.resolve(fileName).normalize();
+            if (!target.startsWith(dir)) {
+                ctx.status(400).json(Map.of("error", "Invalid plugin filename"));
+                return;
+            }
+            AtomicFiles.writeBytes(target, bytes);
+            closeRemotePlugins();
             plugins.clear();
             plugins.addAll(PluginLoader.load());
             ctx.json(Map.of("installed", target.getFileName().toString(), "plugins", plugins.size()));
         } catch (Exception error) {
+            System.err.println("[engine] Could not install plugin: " + error.getMessage());
             ctx.status(500).json(Map.of("error", "Could not install plugin: " + error.getMessage()));
         }
+    }
+
+    private static String safePluginFileName(String rawPath, String digest) {
+        String candidate = "";
+        if (rawPath != null && !rawPath.isBlank()) {
+            Path pathName = Path.of(rawPath).getFileName();
+            if (pathName != null) {
+                candidate = pathName.toString();
+            }
+        }
+        String sanitized = candidate.replaceAll("[^A-Za-z0-9._-]", "_");
+        if (sanitized.isBlank() || ".".equals(sanitized) || "..".equals(sanitized) || !sanitized.endsWith(".jar")) {
+            return "plugin-" + digest.substring(0, 8) + ".jar";
+        }
+        return sanitized;
     }
 
     private static String sha256(byte[] bytes) {
@@ -1011,7 +1118,7 @@ public final class Workspace implements Plugin.PluginContext {
         if (!requireOntology(ctx)) {
             return;
         }
-        String text = request.text() == null ? "" : request.text();
+        String text = request == null || request.text() == null ? "" : request.text();
         if (text.isBlank()) {
             ctx.json(Map.of("ok", false, "error", "Axiom text is empty", "axioms", List.of()));
             return;
@@ -1041,8 +1148,12 @@ public final class Workspace implements Plugin.PluginContext {
         if (!requireOntology(ctx)) {
             return;
         }
-        if (request.iri() == null || request.iri().isBlank()) {
+        if (request == null || request.iri() == null || request.iri().isBlank()) {
             ctx.status(400).json(Map.of("error", "Missing iri"));
+            return;
+        }
+        if (request.marking() == null || request.marking().isBlank()) {
+            ctx.status(400).json(Map.of("error", "Missing marking"));
             return;
         }
         try {
@@ -1062,7 +1173,7 @@ public final class Workspace implements Plugin.PluginContext {
         if (!requireOntology(ctx)) {
             return;
         }
-        if (request.path() == null || request.path().isBlank()) {
+        if (request == null || request.path() == null || request.path().isBlank()) {
             ctx.status(400).json(Map.of("error", "Missing export path"));
             return;
         }
@@ -1257,14 +1368,29 @@ public final class Workspace implements Plugin.PluginContext {
     }
 
     @Override
-    public OWLEntity entity(String iri) {
-        if (iri == null || iri.isBlank()) {
+    public synchronized OWLEntity entity(String iri) {
+        if (ontology == null || iri == null || iri.isBlank()) {
             return null;
         }
         return ontology.signature()
                 .filter(candidate -> candidate.getIRI().toString().equals(iri))
                 .findFirst()
                 .orElse(null);
+    }
+
+    private static IRI parseIri(String raw, String field) {
+        if (raw == null || raw.isBlank()) {
+            throw new IllegalArgumentException("Missing " + field);
+        }
+        try {
+            URI uri = URI.create(raw.trim());
+            if (uri.getScheme() == null || uri.getScheme().isBlank()) {
+                throw new IllegalArgumentException("Invalid IRI for " + field + ": " + raw);
+            }
+            return IRI.create(uri);
+        } catch (IllegalArgumentException error) {
+            throw new IllegalArgumentException("Invalid IRI for " + field + ": " + raw);
+        }
     }
 
     private static void require(OWLEntity entity, String param) {
@@ -1390,12 +1516,18 @@ public final class Workspace implements Plugin.PluginContext {
     }
 
     @Override
-    public List<OWLEntity> entities() {
+    public synchronized List<OWLEntity> entities() {
+        if (ontology == null) {
+            return List.of();
+        }
         return ontology.signature().toList();
     }
 
     @Override
-    public List<String> axiomsOf(OWLEntity entity) {
+    public synchronized List<String> axiomsOf(OWLEntity entity) {
+        if (ontology == null || entity == null) {
+            return List.of();
+        }
         return ontology.getReferencingAxioms(entity).stream()
                 .filter(axiom -> !axiom.isAnnotationAxiom())
                 .filter(axiom -> !axiom.isOfType(AxiomType.DECLARATION))
@@ -1420,7 +1552,13 @@ public final class Workspace implements Plugin.PluginContext {
     }
 
     @Override
-    public String label(OWLEntity entity) {
+    public synchronized String label(OWLEntity entity) {
+        if (entity == null) {
+            return "";
+        }
+        if (ontology == null) {
+            return entity.getIRI().getShortForm();
+        }
         return EntitySearcher.getAnnotations(entity, ontology, dataFactory.getRDFSLabel())
                 .findFirst()
                 .map(annotation -> annotation.getValue().asLiteral().map(literal -> literal.getLiteral()).orElse(null))

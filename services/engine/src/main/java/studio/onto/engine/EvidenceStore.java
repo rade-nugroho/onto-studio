@@ -97,7 +97,7 @@ public final class EvidenceStore {
     }
 
     private static String author() {
-        String configured = System.getenv("ONTO_STUDIO_AUTHOR");
+        String configured = EnvFile.get("ONTO_STUDIO_AUTHOR");
         if (configured != null && !configured.isBlank()) {
             return configured;
         }
@@ -114,8 +114,9 @@ public final class EvidenceStore {
                     rows.add(MAPPER.readValue(line, Map.class));
                 }
             }
-        } catch (IOException ignored) {
+        } catch (IOException error) {
             // A corrupt evidence file must not block opening the ontology.
+            System.err.println("[engine] Failed to read evidence from " + file + ": " + error.getMessage());
         }
     }
 
@@ -124,8 +125,9 @@ public final class EvidenceStore {
             Files.createDirectories(file.getParent());
             Files.writeString(file, MAPPER.writeValueAsString(row) + System.lineSeparator(),
                     StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-        } catch (IOException ignored) {
+        } catch (IOException error) {
             // Evidence is best effort; the edit itself already succeeded.
+            System.err.println("[engine] Failed to append evidence to " + file + ": " + error.getMessage());
         }
     }
 }

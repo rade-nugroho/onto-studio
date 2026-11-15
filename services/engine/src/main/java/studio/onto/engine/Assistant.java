@@ -43,7 +43,7 @@ import java.util.Objects;
  * in a cloud sandbox, but every ontology operation is a custom tool executed by
  * this engine against the open workspace.
  */
-public final class Assistant {
+public final class Assistant implements AutoCloseable {
 
     private static final String SYSTEM_PROMPT = """
             You are the assistant inside Onto Studio, an ontology workbench.
@@ -84,6 +84,8 @@ public final class Assistant {
 
     private volatile String baseUrl = "";
     private volatile String token = "";
+    private AnthropicClient client;
+    private String clientApiKey;
     private String agentId;
     private String environmentId;
     private String sessionId;
@@ -100,8 +102,40 @@ public final class Assistant {
         this.token = token;
     }
 
+    @Override
+    public void close() {
+        synchronized (lock) {
+            closeClient();
+        }
+    }
+
+    private void closeClient() {
+        if (client != null) {
+            try {
+                client.close();
+            } catch (Exception error) {
+                System.err.println("[engine] Failed to close AnthropicClient: " + error.getMessage());
+            } finally {
+                client = null;
+                clientApiKey = null;
+            }
+        }
+    }
+
+    private AnthropicClient clientFor(String apiKey) {
+        if (client == null || !Objects.equals(clientApiKey, apiKey)) {
+            closeClient();
+            client = AnthropicOkHttpClient.builder()
+                    .apiKey(apiKey)
+                    .timeout(SESSION_BUDGET)
+                    .build();
+            clientApiKey = apiKey;
+        }
+        return client;
+    }
+
     public void answer(String question, String entityIri, Context ctx) {
-        String apiKey = System.getenv("ANTHROPIC_API_KEY");
+        String apiKey = EnvFile.get("ANTHROPIC_API_KEY");
         if (apiKey == null || apiKey.isBlank()) {
             ctx.status(503).json(Map.of(
                     "error", "Set ANTHROPIC_API_KEY in the environment to use the assistant"));
@@ -114,7 +148,7 @@ public final class Assistant {
         try {
             String text;
             synchronized (lock) {
-                text = ask(question, entityIri);
+                text = ask(apiKey, question, entityIri);
             }
             if (text.isBlank()) {
                 text = "The assistant returned no text.";
@@ -125,8 +159,8 @@ public final class Assistant {
         }
     }
 
-    private String ask(String question, String entityIri) throws Exception {
-        AnthropicClient client = AnthropicOkHttpClient.fromEnv();
+    private String ask(String apiKey, String question, String entityIri) throws Exception {
+        AnthropicClient client = clientFor(apiKey);
         ensureResources(client);
         ensureSession(client);
 
@@ -214,7 +248,7 @@ public final class Assistant {
     }
 
     private static String modelId() {
-        String configured = System.getenv("ANTHROPIC_MODEL");
+        String configured = EnvFile.get("ANTHROPIC_MODEL");
         return configured == null || configured.isBlank() ? DEFAULT_MODEL : configured.trim();
     }
 
@@ -443,23 +477,24 @@ public final class Assistant {
             sessionId = state.get("sessionId");
             sessionPath = state.get("sessionPath");
             configSignature = state.get("configSignature");
-        } catch (Exception ignored) {
+        } catch (Exception error) {
             // A corrupt cache only costs one extra agent/environment creation.
+            System.err.println("[engine] Failed to read assistant state from " + stateFile + ": " + error.getMessage());
         }
     }
 
     private void saveState() {
         try {
-            Files.createDirectories(stateFile.getParent());
             Map<String, String> state = new LinkedHashMap<>();
             put(state, "agentId", agentId);
             put(state, "environmentId", environmentId);
             put(state, "sessionId", sessionId);
             put(state, "sessionPath", sessionPath);
             put(state, "configSignature", configSignature);
-            mapper.writeValue(stateFile.toFile(), state);
-        } catch (Exception ignored) {
+            AtomicFiles.writeJson(stateFile, mapper, state);
+        } catch (Exception error) {
             // The assistant still works without the cache.
+            System.err.println("[engine] Failed to write assistant state to " + stateFile + ": " + error.getMessage());
         }
     }
 

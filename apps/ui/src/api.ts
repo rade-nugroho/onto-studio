@@ -116,29 +116,100 @@ async function engine(): Promise<EngineInfo> {
   return cached;
 }
 
-async function call<T>(path: string, init?: RequestInit): Promise<T> {
+export function isAbortError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "name" in error &&
+    (error as { name: unknown }).name === "AbortError"
+  );
+}
+
+const DEFAULT_TIMEOUT_MS = 30_000;
+
+function withTimeoutSignal(
+  externalSignal?: AbortSignal,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+): { signal: AbortSignal; cleanup: () => void } {
+  const timeoutSignal =
+    typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+      ? AbortSignal.timeout(timeoutMs)
+      : undefined;
+
+  if (timeoutSignal && externalSignal && typeof AbortSignal.any === "function") {
+    return { signal: AbortSignal.any([externalSignal, timeoutSignal]), cleanup: () => {} };
+  }
+  if (timeoutSignal && !externalSignal) {
+    return { signal: timeoutSignal, cleanup: () => {} };
+  }
+
+  const controller = new AbortController();
+  const onExternalAbort = () => controller.abort(externalSignal?.reason);
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      controller.abort(externalSignal.reason);
+    } else {
+      externalSignal.addEventListener("abort", onExternalAbort, { once: true });
+    }
+  }
+  const timer = setTimeout(() => {
+    controller.abort(new DOMException("Request timed out", "TimeoutError"));
+  }, timeoutMs);
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      clearTimeout(timer);
+      externalSignal?.removeEventListener("abort", onExternalAbort);
+    },
+  };
+}
+
+async function call<T>(
+  path: string,
+  init?: RequestInit & { timeoutMs?: number },
+): Promise<T> {
   const info = await engine();
+  const { timeoutMs, signal: externalSignal, ...fetchInit } = init ?? {};
+  const { signal, cleanup } = withTimeoutSignal(externalSignal ?? undefined, timeoutMs);
   let response: Response;
   try {
     response = await fetch(`http://127.0.0.1:${info.port}${path}`, {
-    ...init,
+      ...fetchInit,
+      signal,
       headers: {
         "X-Engine-Token": info.token,
         "Content-Type": "application/json",
-        ...(init?.headers ?? {}),
+        ...(fetchInit.headers ?? {}),
       },
     });
-  } catch {
-    throw new Error("Engine is not reachable. Start it with ./scripts/dev.sh");
+  } catch (error) {
+    const name =
+      typeof error === "object" && error !== null && "name" in error
+        ? (error as { name: unknown }).name
+        : undefined;
+    if (name === "AbortError" || name === "TimeoutError") {
+      throw error;
+    }
+    throw new Error("Engine is not reachable. Check that the engine is running.");
+  } finally {
+    cleanup();
   }
   if (!response.ok) {
     const body = await response.text();
+    let parsedError: string | undefined;
     try {
-      const parsed = JSON.parse(body) as { error?: string };
-      throw new Error(parsed.error ?? body);
-    } catch (error) {
-      throw error instanceof Error ? error : new Error(body);
+      const parsed = JSON.parse(body) as { error?: unknown };
+      if (typeof parsed?.error === "string" && parsed.error.length > 0) {
+        parsedError = parsed.error;
+      }
+    } catch {
+      // Non-JSON error body; preserve HTTP status and raw body below.
     }
+    throw new Error(
+      parsedError ??
+        (body ? `HTTP ${response.status}: ${body}` : `HTTP ${response.status} ${response.statusText}`),
+    );
   }
   return response.json() as Promise<T>;
 }
@@ -149,7 +220,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ path }),
     }),
-  hierarchy: (parent?: string, inferred?: boolean) => {
+  hierarchy: (parent?: string, inferred?: boolean, signal?: AbortSignal) => {
     const params = new URLSearchParams();
     if (parent) {
       params.set("parent", parent);
@@ -158,13 +229,14 @@ export const api = {
       params.set("inferred", "true");
     }
     const query = params.toString();
-    return call<{ children: TreeNode[] }>(`/hierarchy${query ? `?${query}` : ""}`);
+    return call<{ children: TreeNode[] }>(`/hierarchy${query ? `?${query}` : ""}`, { signal });
   },
-  entity: (iri: string) =>
-    call<EntityInfo>(`/entity?iri=${encodeURIComponent(iri)}`),
-  graph: (root: string | undefined, depth: number, inferred?: boolean) =>
+  entity: (iri: string, signal?: AbortSignal) =>
+    call<EntityInfo>(`/entity?iri=${encodeURIComponent(iri)}`, { signal }),
+  graph: (root: string | undefined, depth: number, inferred?: boolean, signal?: AbortSignal) =>
     call<GraphSlice>(
       `/graph?depth=${depth}${root ? `&root=${encodeURIComponent(root)}` : ""}${inferred ? "&inferred=true" : ""}`,
+      { signal },
     ),
   startReasoner: () => call<{ running: boolean; name: string }>("/reasoner/start", { method: "POST" }),
   stopReasoner: () => call<{ running: boolean }>("/reasoner/stop", { method: "POST" }),
@@ -178,10 +250,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ sub, sup }),
     }),
-  validateAxiom: (text: string) =>
+  validateAxiom: (text: string, signal?: AbortSignal) =>
     call<{ ok: boolean; axioms: string[]; unknown?: string[]; error?: string }>(
       "/axiom/validate",
-      { method: "POST", body: JSON.stringify({ text }) },
+      { method: "POST", body: JSON.stringify({ text }), signal },
     ),
   addAxiomText: (text: string) =>
     call<EditState & { added: string[] }>("/axiom/add-text", {
@@ -212,7 +284,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ action, params, reason }),
     }),
-  audit: () => call<{ rows: AuditRow[] }>("/audit"),
+  audit: (signal?: AbortSignal) => call<{ rows: AuditRow[] }>("/audit", { signal }),
   setMarking: (iri: string, marking: string) =>
     call<{ iri: string; marking: string }>("/marking/set", {
       method: "POST",
@@ -223,7 +295,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ path, includeRestricted }),
     }),
-  plugins: () =>
+  plugins: (signal?: AbortSignal) =>
     call<{
       plugins: {
         name: string;
@@ -232,6 +304,7 @@ export const api = {
       }[];
     }>(
       "/plugins",
+      { signal },
     ),
   installPlugin: (url: string, sha256: string) =>
     call<{ installed: string; plugins: number }>("/plugins/install", {
@@ -272,11 +345,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify(path ? { path } : {}),
     }),
-  search: (query: string, kind?: string) => {
+  search: (query: string, kind?: string, signal?: AbortSignal) => {
     const params = new URLSearchParams({ q: query });
     if (kind) {
       params.set("kind", kind);
     }
-    return call<{ results: SearchResult[] }>(`/search?${params.toString()}`);
+    return call<{ results: SearchResult[] }>(`/search?${params.toString()}`, { signal });
   },
 };

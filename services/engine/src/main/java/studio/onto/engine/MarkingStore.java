@@ -64,17 +64,18 @@ public final class MarkingStore {
         try {
             markings.putAll(MAPPER.readValue(file.toFile(), new TypeReference<Map<String, String>>() {
             }));
-        } catch (IOException ignored) {
+        } catch (IOException error) {
             // A corrupt marking file must not block opening the ontology.
+            System.err.println("[engine] Failed to read markings from " + file + ": " + error.getMessage());
         }
     }
 
     private void save() {
         try {
-            Files.createDirectories(file.getParent());
-            MAPPER.writeValue(file.toFile(), markings);
-        } catch (IOException ignored) {
+            AtomicFiles.writeJson(file, MAPPER, markings);
+        } catch (IOException error) {
             // Best effort; the in-memory marking still applies for this session.
+            System.err.println("[engine] Failed to write markings to " + file + ": " + error.getMessage());
         }
     }
 }

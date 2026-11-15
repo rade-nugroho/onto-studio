@@ -41,12 +41,14 @@ public final class PluginLoader {
                     } else {
                         remote.close();
                     }
-                } catch (Exception ignored) {
+                } catch (Exception error) {
                     // A broken plugin must not stop the engine from starting.
+                    System.err.println("[engine] Failed to load plugin " + jar.getFileName() + ": " + error.getMessage());
                 }
             }
-        } catch (Exception ignored) {
+        } catch (Exception error) {
             // Unreadable plugin directory: run with the built-in actions only.
+            System.err.println("[engine] Failed to scan plugin directory " + dir + ": " + error.getMessage());
         }
         return plugins;
     }

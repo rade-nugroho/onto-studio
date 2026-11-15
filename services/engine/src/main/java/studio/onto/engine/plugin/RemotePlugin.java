@@ -2,10 +2,13 @@ package studio.onto.engine.plugin;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.semanticweb.owlapi.apibinding.OWLManager;
+import org.semanticweb.owlapi.functional.parser.OWLFunctionalSyntaxOWLParser;
 import org.semanticweb.owlapi.io.StringDocumentSource;
 import org.semanticweb.owlapi.model.OWLAxiom;
 import org.semanticweb.owlapi.model.OWLEntity;
 import org.semanticweb.owlapi.model.OWLOntology;
+import org.semanticweb.owlapi.model.OWLOntologyLoaderConfiguration;
+import org.semanticweb.owlapi.model.OWLOntologyManager;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
@@ -17,6 +20,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -24,11 +28,13 @@ import java.util.concurrent.TimeUnit;
  * stdio, so a plugin can crash, hang, or corrupt its own heap without taking the
  * workbench down.
  */
-public final class RemotePlugin implements Plugin {
+public final class RemotePlugin implements Plugin, AutoCloseable {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final long TIMEOUT_SECONDS = 10;
     private static final int MAX_ENTITIES = 2000;
+    private static final OWLOntologyManager PARSE_MANAGER = OWLManager.createOWLOntologyManager();
+    private static final OWLFunctionalSyntaxOWLParser PARSER = new OWLFunctionalSyntaxOWLParser();
 
     private final Path jar;
     private final Process process;
@@ -42,27 +48,32 @@ public final class RemotePlugin implements Plugin {
     public RemotePlugin(Path jar) throws Exception {
         this.jar = jar;
         this.process = new ProcessBuilder(
-                javaBinary(), "-cp", System.getProperty("java.class.path"),
+                javaBinary(), "-Xmx128m", "-cp", System.getProperty("java.class.path"),
                 "studio.onto.engine.plugin.PluginHost", jar.toString())
-                .redirectError(ProcessBuilder.Redirect.DISCARD)
+                .redirectError(ProcessBuilder.Redirect.INHERIT)
                 .start();
-        this.toHost = new BufferedWriter(new OutputStreamWriter(process.getOutputStream(), StandardCharsets.UTF_8));
-        this.fromHost = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
+        try {
+            this.toHost = new BufferedWriter(new OutputStreamWriter(process.getOutputStream(), StandardCharsets.UTF_8));
+            this.fromHost = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
 
-        Map<String, Object> described = request(Map.of("op", "describe"));
-        List<Map<String, Object>> plugins = (List<Map<String, Object>>) described.getOrDefault("plugins", List.of());
-        if (plugins.isEmpty()) {
-            throw new IllegalStateException("Plugin jar exposes no Plugin implementation");
-        }
-        Map<String, Object> first = plugins.get(0);
-        this.name = String.valueOf(first.get("name"));
-        this.permissions = new java.util.LinkedHashSet<>(
-                (List<String>) first.getOrDefault("permissions", List.of("read")));
-        for (Map<String, Object> action : (List<Map<String, Object>>) first.getOrDefault("actions", List.of())) {
-            actions.add(new RemoteAction(
-                    String.valueOf(action.get("name")),
-                    String.valueOf(action.get("description")),
-                    (Map<String, String>) action.getOrDefault("params", Map.of())));
+            Map<String, Object> described = request(Map.of("op", "describe"));
+            List<Map<String, Object>> plugins = (List<Map<String, Object>>) described.getOrDefault("plugins", List.of());
+            if (plugins.isEmpty()) {
+                throw new IllegalStateException("Plugin jar exposes no Plugin implementation");
+            }
+            Map<String, Object> first = plugins.get(0);
+            this.name = String.valueOf(first.get("name"));
+            this.permissions = new java.util.LinkedHashSet<>(
+                    (List<String>) first.getOrDefault("permissions", List.of("read")));
+            for (Map<String, Object> action : (List<Map<String, Object>>) first.getOrDefault("actions", List.of())) {
+                actions.add(new RemoteAction(
+                        String.valueOf(action.get("name")),
+                        String.valueOf(action.get("description")),
+                        (Map<String, String>) action.getOrDefault("params", Map.of())));
+            }
+        } catch (Throwable error) {
+            process.destroyForcibly();
+            throw error;
         }
     }
 
@@ -81,13 +92,29 @@ public final class RemotePlugin implements Plugin {
         return actions;
     }
 
+    @Override
     public void close() {
         try {
-            request(Map.of("op", "quit"));
+            if (process.isAlive()) {
+                toHost.write(MAPPER.writeValueAsString(Map.of("op", "quit")));
+                toHost.newLine();
+                toHost.flush();
+                if (!process.waitFor(2, TimeUnit.SECONDS)) {
+                    process.destroyForcibly();
+                }
+            }
         } catch (Exception ignored) {
-            // Already gone.
+            process.destroyForcibly();
+        } finally {
+            try {
+                toHost.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                fromHost.close();
+            } catch (Exception ignored) {
+            }
         }
-        process.destroy();
     }
 
     private static String javaBinary() {
@@ -163,13 +190,20 @@ public final class RemotePlugin implements Plugin {
         return "individual";
     }
 
-    private static OWLAxiom parseAxiom(String text) throws Exception {
-        var manager = OWLManager.createOWLOntologyManager();
-        OWLOntology ontology = manager.createOntology();
-        new org.semanticweb.owlapi.functional.parser.OWLFunctionalSyntaxOWLParser()
-                .parse(new StringDocumentSource("Ontology(" + text + ")"), ontology,
-                        new org.semanticweb.owlapi.model.OWLOntologyLoaderConfiguration());
-        return ontology.getAxioms().iterator().next();
+    private static synchronized OWLAxiom parseAxiom(String text) throws Exception {
+        OWLOntology ontology = PARSE_MANAGER.createOntology();
+        try {
+            PARSER.parse(new StringDocumentSource("Ontology(" + text + ")"), ontology,
+                    new OWLOntologyLoaderConfiguration());
+            Set<OWLAxiom> axioms = ontology.getAxioms();
+            if (axioms.size() != 1) {
+                throw new IllegalArgumentException(
+                        "Expected 1 axiom from plugin, got " + axioms.size());
+            }
+            return axioms.iterator().next();
+        } finally {
+            PARSE_MANAGER.removeOntology(ontology);
+        }
     }
 
     private final class RemoteAction implements PluginAction {

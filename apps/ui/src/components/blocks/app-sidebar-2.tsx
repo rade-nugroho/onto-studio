@@ -118,12 +118,12 @@ function Flyout({
   label: string;
   items: string[];
   align: "top" | "bottom";
-  menuRef?: React.RefObject<HTMLDivElement>;
+  menuRef?: React.RefObject<HTMLDivElement | null>;
   onSelect?: (label: string, item: string) => void;
 }) {
   return (
     <div
-      ref={menuRef as React.RefObject<HTMLDivElement>}
+      ref={menuRef}
       className={cx(
         "absolute left-full z-30 pl-2",
         align === "top" ? "top-0" : "bottom-0",

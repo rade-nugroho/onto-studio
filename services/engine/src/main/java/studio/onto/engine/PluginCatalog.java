@@ -9,7 +9,9 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -58,11 +60,13 @@ public final class PluginCatalog {
     /** True when the stored signature matches the pinned url and digest. */
     public synchronized boolean verify(String name, Entry entry) {
         String key = key();
-        if (key == null || entry == null) {
+        if (key == null || entry == null || entry.signature() == null) {
             return false;
         }
         String expected = sign(key, name, entry.url(), entry.sha256());
-        return expected.equalsIgnoreCase(entry.signature());
+        return MessageDigest.isEqual(
+                expected.getBytes(StandardCharsets.UTF_8),
+                entry.signature().toLowerCase(Locale.ROOT).getBytes(StandardCharsets.UTF_8));
     }
 
     private static String key() {
@@ -92,17 +96,17 @@ public final class PluginCatalog {
         try {
             entries.putAll(MAPPER.readValue(file.toFile(), new TypeReference<Map<String, Entry>>() {
             }));
-        } catch (IOException ignored) {
+        } catch (IOException error) {
             // A corrupt catalog must not block the engine.
+            System.err.println("[engine] Failed to read plugin catalog " + file + ": " + error.getMessage());
         }
     }
 
     private void save() {
         try {
-            Files.createDirectories(file.getParent());
-            MAPPER.writeValue(file.toFile(), entries);
-        } catch (IOException ignored) {
-            // Best effort.
+            AtomicFiles.writeJson(file, MAPPER, entries);
+        } catch (IOException error) {
+            System.err.println("[engine] Failed to write plugin catalog " + file + ": " + error.getMessage());
         }
     }
 }

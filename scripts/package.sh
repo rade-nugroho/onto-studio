@@ -2,7 +2,10 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-export JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21)}"
+if [ -z "${JAVA_HOME:-}" ] && command -v /usr/libexec/java_home >/dev/null 2>&1; then
+  export JAVA_HOME="$(/usr/libexec/java_home -v 21)"
+fi
+: "${JAVA_HOME:?JAVA_HOME is not set and /usr/libexec/java_home was not found}"
 RESOURCES="$ROOT/apps/desktop/src-tauri/resources"
 
 echo "== engine =="
@@ -24,5 +27,8 @@ cp "$ROOT/services/engine/target/engine.jar" "$RESOURCES/engine.jar"
 echo "== tauri app =="
 (cd "$ROOT/apps/desktop" && [ -d node_modules ] || npm install --no-audit --no-fund)
 (cd "$ROOT/apps/desktop" && npm run build)
+
+echo "== smoke test =="
+"$ROOT/scripts/smoke-package.sh" "$ROOT/apps/desktop/src-tauri/target/release/bundle/macos/Onto Studio.app/Contents/Resources/resources"
 
 echo "Bundle: $ROOT/apps/desktop/src-tauri/target/release/bundle/macos/Onto Studio.app"

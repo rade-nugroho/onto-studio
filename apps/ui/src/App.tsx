@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
+  isAbortError,
   type BranchDiff,
   type BranchInfo,
   type EditState,
@@ -10,7 +11,7 @@ import {
   type TreeNode,
 } from "./api";
 import EntityPanel from "./EntityPanel";
-import GraphView from "./GraphView";
+import ErrorBoundary from "./ErrorBoundary";
 import AppShell9 from "@/components/blocks/app-shell-9";
 import CommandMenu1, { type Command } from "@/components/blocks/command-menu-1";
 import AppSidebar2 from "@/components/blocks/app-sidebar-2";
@@ -24,6 +25,22 @@ import {
   Search01Icon,
   SparklesIcon,
 } from "@hugeicons/core-free-icons";
+
+const GraphView = lazy(() => import("./GraphView"));
+
+export function shouldIgnoreGlobalShortcut(event: KeyboardEvent): boolean {
+  const target = event.target;
+  if (target instanceof HTMLElement) {
+    const tag = target.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable) {
+      return true;
+    }
+    if (target.closest('[role="dialog"]')) {
+      return true;
+    }
+  }
+  return document.querySelector('[role="dialog"]') !== null;
+}
 
 type ChildrenByIri = Record<string, TreeNode[]>;
 
@@ -48,20 +65,68 @@ export default function App() {
   const [diff, setDiff] = useState<BranchDiff | null>(null);
   const [version, setVersion] = useState(0);
   const [error, setError] = useState<string | null>(null);
-
-  const loadChildren = useCallback(async (parent?: string) => {
-    const key = parent ?? "root";
-    const response = await api.hierarchy(parent, reasoning);
-    setChildren((current) => ({ ...current, [key]: response.children }));
-    return response.children;
-  }, [reasoning]);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [treeLoading, setTreeLoading] = useState(false);
+  const [entityLoading, setEntityLoading] = useState(false);
+  const searchAbortRef = useRef<AbortController | null>(null);
+  const selectAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    loadChildren().catch((e: Error) => setError(e.message));
+    return () => {
+      searchAbortRef.current?.abort();
+      selectAbortRef.current?.abort();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!dirty) {
+      return;
+    }
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [dirty]);
+
+  const loadChildren = useCallback(
+    async (parent?: string, signal?: AbortSignal) => {
+      const key = parent ?? "root";
+      if (!parent) {
+        setTreeLoading(true);
+      }
+      try {
+        const response = await api.hierarchy(parent, reasoning, signal);
+        if (!signal?.aborted) {
+          setChildren((current) => ({ ...current, [key]: response.children }));
+        }
+        return response.children;
+      } finally {
+        if (!parent && !signal?.aborted) {
+          setTreeLoading(false);
+        }
+      }
+    },
+    [reasoning],
+  );
+
+  useEffect(() => {
+    const controller = new AbortController();
+    loadChildren(undefined, controller.signal).catch((e: unknown) => {
+      if (!isAbortError(e)) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    });
+    return () => controller.abort();
   }, [loadChildren]);
 
   const openFile = useCallback(async () => {
+    if (dirty && !window.confirm("You have unsaved changes. Discard them and open another ontology?")) {
+      return;
+    }
     setError(null);
+    setNotice(null);
     try {
       let path: string | null = null;
       const inTauri = "__TAURI_INTERNALS__" in window;
@@ -96,17 +161,26 @@ export default function App() {
     } catch (e) {
       setError((e as Error).message);
     }
-  }, [loadChildren]);
+  }, [dirty, loadChildren]);
 
   const refreshBranches = useCallback(async () => {
-    setBranches((await api.branches()).branches);
+    try {
+      setBranches((await api.branches()).branches);
+    } catch (e) {
+      setError((e as Error).message);
+    }
   }, []);
 
   const switchBranch = useCallback(
     async (name: string) => {
+      if (dirty && !window.confirm("You have unsaved changes. Discard them and switch branch?")) {
+        return;
+      }
+      setError(null);
       try {
         await api.switchBranch(name);
         setActiveBranch(name);
+        setDirty(false);
         setDiff(null);
         setChildren({});
         setExpanded(new Set());
@@ -117,7 +191,7 @@ export default function App() {
         setError((e as Error).message);
       }
     },
-    [loadChildren, refreshBranches],
+    [dirty, loadChildren, refreshBranches],
   );
 
   const newBranch = useCallback(async () => {
@@ -125,6 +199,7 @@ export default function App() {
     if (!name) {
       return;
     }
+    setError(null);
     try {
       await api.createBranch(name);
       await refreshBranches();
@@ -135,6 +210,7 @@ export default function App() {
   }, [refreshBranches, switchBranch]);
 
   const showDiff = useCallback(async () => {
+    setError(null);
     try {
       setDiff(await api.branchDiff(activeBranch));
     } catch (e) {
@@ -147,6 +223,7 @@ export default function App() {
     if (reason === null) {
       return;
     }
+    setError(null);
     try {
       await api.promoteBranch(activeBranch, reason);
       setActiveBranch("main");
@@ -164,23 +241,44 @@ export default function App() {
       const next = new Set(expanded);
       if (next.has(node.iri)) {
         next.delete(node.iri);
-      } else {
-        next.add(node.iri);
-        if (!children[node.iri]) {
+        setExpanded(next);
+        return;
+      }
+      if (!children[node.iri]) {
+        try {
+          setError(null);
           await loadChildren(node.iri);
+        } catch (e) {
+          setError((e as Error).message);
+          return;
         }
       }
+      next.add(node.iri);
       setExpanded(next);
     },
     [children, expanded, loadChildren],
   );
 
   const select = useCallback(async (iri: string) => {
+    selectAbortRef.current?.abort();
+    const controller = new AbortController();
+    selectAbortRef.current = controller;
     setSelected(iri);
+    setEntityLoading(true);
+    setError(null);
     try {
-      setEntity(await api.entity(iri));
+      const info = await api.entity(iri, controller.signal);
+      if (!controller.signal.aborted) {
+        setEntity(info);
+      }
     } catch (e) {
-      setError((e as Error).message);
+      if (!isAbortError(e)) {
+        setError((e as Error).message);
+      }
+    } finally {
+      if (!controller.signal.aborted) {
+        setEntityLoading(false);
+      }
     }
   }, []);
 
@@ -191,21 +289,28 @@ export default function App() {
   }, []);
 
   const refreshSelected = useCallback(async () => {
-    if (selected) {
+    if (!selected) {
+      return;
+    }
+    try {
       setEntity(await api.entity(selected));
+    } catch (e) {
+      setError((e as Error).message);
     }
   }, [selected]);
 
   const onEdited = useCallback(
     (state: EditState) => {
+      setError(null);
       applyEditState(state);
       setVersion((v) => v + 1);
-      refreshSelected().catch((e: Error) => setError(e.message));
+      void refreshSelected();
     },
     [applyEditState, refreshSelected],
   );
 
   const toggleReasoner = useCallback(async () => {
+    setError(null);
     try {
       if (reasoning) {
         await api.stopReasoner();
@@ -224,14 +329,18 @@ export default function App() {
   }, [loadChildren, reasoning]);
 
   const save = useCallback(async () => {
+    setError(null);
     try {
-      applyEditState(await api.save());
+      const saved = await api.save();
+      applyEditState(saved);
+      setNotice(`Saved ${saved.path}`);
     } catch (e) {
       setError((e as Error).message);
     }
   }, [applyEditState]);
 
   const undo = useCallback(async () => {
+    setError(null);
     try {
       applyEditState(await api.undo());
       setVersion((v) => v + 1);
@@ -242,6 +351,7 @@ export default function App() {
   }, [applyEditState, refreshSelected]);
 
   const redo = useCallback(async () => {
+    setError(null);
     try {
       applyEditState(await api.redo());
       setVersion((v) => v + 1);
@@ -253,6 +363,9 @@ export default function App() {
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      if (shouldIgnoreGlobalShortcut(event)) {
+        return;
+      }
       const mod = event.metaKey || event.ctrlKey;
       if (!mod) {
         return;
@@ -267,6 +380,9 @@ export default function App() {
       } else if (key === "s") {
         event.preventDefault();
         save();
+      } else if (key === "o") {
+        event.preventDefault();
+        openFile();
       } else if (key === "1") {
         event.preventDefault();
         setView("tree");
@@ -277,27 +393,45 @@ export default function App() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [redo, save, undo]);
+  }, [openFile, redo, save, undo]);
 
   const runSearch = useCallback(async (value: string) => {
     setQuery(value);
+    searchAbortRef.current?.abort();
     if (value.trim().length < 2) {
       setResults([]);
       return;
     }
+    const controller = new AbortController();
+    searchAbortRef.current = controller;
+    setError(null);
     try {
-      setResults((await api.search(value)).results);
+      const response = await api.search(value, undefined, controller.signal);
+      if (!controller.signal.aborted) {
+        setResults(response.results);
+      }
     } catch (e) {
-      setError((e as Error).message);
+      if (!isAbortError(e)) {
+        setError((e as Error).message);
+      }
     }
   }, []);
 
   const listKind = useCallback(async (kind: string) => {
     setQuery("");
+    searchAbortRef.current?.abort();
+    const controller = new AbortController();
+    searchAbortRef.current = controller;
+    setError(null);
     try {
-      setResults((await api.search("", kind)).results);
+      const response = await api.search("", kind, controller.signal);
+      if (!controller.signal.aborted) {
+        setResults(response.results);
+      }
     } catch (e) {
-      setError((e as Error).message);
+      if (!isAbortError(e)) {
+        setError((e as Error).message);
+      }
     }
   }, []);
 
@@ -365,7 +499,10 @@ export default function App() {
           }
           api
             .installPlugin(url, sha256)
-            .then((result) => setError(`Installed ${result.installed} (${result.plugins} plugins loaded)`))
+            .then((result) => {
+              setError(null);
+              setNotice(`Installed ${result.installed} (${result.plugins} plugins loaded)`);
+            })
             .catch((e: Error) => setError(e.message));
           break;
         }
@@ -455,7 +592,12 @@ export default function App() {
           </button>
         </div>
         {view === "graph" && (
-          <select className="depth" value={depth} onChange={(event) => setDepth(Number(event.target.value))}>
+          <select
+            className="depth"
+            aria-label="Graph depth"
+            value={depth}
+            onChange={(event) => setDepth(Number(event.target.value))}
+          >
             <option value={1}>1 level</option>
             <option value={2}>2 levels</option>
             <option value={3}>3 levels</option>
@@ -463,10 +605,16 @@ export default function App() {
         )}
         <input
           className="search"
+          aria-label="Search entities"
           placeholder="Search classes, properties, individuals"
           value={query}
           onChange={(event) => runSearch(event.target.value)}
         />
+        {dirty && (
+          <span className="unsaved-indicator" title="Unsaved changes">
+            Unsaved
+          </span>
+        )}
         {ontology && (
           <span className="meta">
             {ontology.axiomCount.toLocaleString()} axioms · {ontology.entityCount} entities
@@ -488,6 +636,7 @@ export default function App() {
           <span className="muted">Branch</span>
           <select
             className="depth"
+            aria-label="Active branch"
             value={activeBranch}
             onChange={(event) => switchBranch(event.target.value)}
           >
@@ -515,7 +664,7 @@ export default function App() {
           <div className="preview-head">
             {diff.branch} vs main · +{diff.added.length} / -{diff.removed.length} asserted ·{" "}
             +{diff.inferredAdded.length} / -{diff.inferredRemoved.length} inferred
-            <button className="remove" onClick={() => setDiff(null)}>
+            <button className="remove" aria-label="Close branch diff" onClick={() => setDiff(null)}>
               ×
             </button>
           </div>
@@ -552,18 +701,26 @@ export default function App() {
       >
         {view === "graph" ? (
           <div className="canvas">
-            <GraphView
-              depth={depth}
-              version={version}
-              inferred={reasoning}
-              selected={selected}
-              onSelect={select}
-              onError={setError}
-            />
+            <ErrorBoundary name="Graph" onReset={() => setVersion((v) => v + 1)}>
+              <Suspense fallback={<div className="empty">Loading graph…</div>}>
+                <GraphView
+                  depth={depth}
+                  version={version}
+                  inferred={reasoning}
+                  selected={selected}
+                  onSelect={select}
+                  onError={setError}
+                />
+              </Suspense>
+            </ErrorBoundary>
           </div>
         ) : (
-          <aside className="tree">
-            {roots.length === 0 && (
+          <aside className="tree" role="tree" aria-label="Class hierarchy">
+            {treeLoading && roots.length === 0 && <div className="empty">Loading classes…</div>}
+            {!treeLoading && roots.length === 0 && ontology && (
+              <div className="empty">No classes in ontology</div>
+            )}
+            {!treeLoading && roots.length === 0 && !ontology && (
               <div className="empty empty-cta">
                 <p>No ontology open</p>
                 <button onClick={openFile}>Open ontology…</button>
@@ -585,20 +742,23 @@ export default function App() {
         )}
 
         <section className="detail">
-          {!entity && (
+          {entityLoading && !entity && <div className="empty">Loading entity…</div>}
+          {!entityLoading && !entity && (
             <div className="empty empty-cta">
               <p>Select a class to see its axioms</p>
               <button onClick={openFile}>Open ontology…</button>
             </div>
           )}
           {entity && (
-            <EntityPanel
-              key={entity.iri + version}
-              entity={entity}
-              onEdited={onEdited}
-              onSelect={select}
-              onError={setError}
-            />
+            <ErrorBoundary key={entity.iri + version} name="Entity details">
+              <EntityPanel
+                key={entity.iri + version}
+                entity={entity}
+                onEdited={onEdited}
+                onSelect={select}
+                onError={setError}
+              />
+            </ErrorBoundary>
           )}
         </section>
 
@@ -609,7 +769,22 @@ export default function App() {
         )}
       </main>
 
-      {error && <div className="error">{error}</div>}
+      {notice && (
+        <div className="notice" role="status">
+          <span>{notice}</span>
+          <button className="banner-dismiss" aria-label="Dismiss notice" onClick={() => setNotice(null)}>
+            ×
+          </button>
+        </div>
+      )}
+      {error && (
+        <div className="error" role="alert">
+          <span>{error}</span>
+          <button className="banner-dismiss" aria-label="Dismiss error" onClick={() => setError(null)}>
+            ×
+          </button>
+        </div>
+      )}
     </div>
     </AppShell9>
   );
@@ -645,14 +820,51 @@ function TreeItem(props: TreeItemProps) {
   const isOpen = expanded.has(node.iri);
   const kids = childrenByIri[node.iri] ?? [];
 
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onSelect(node.iri);
+    } else if (event.key === "ArrowRight" && node.hasChildren && !isOpen) {
+      event.preventDefault();
+      onToggle(node);
+    } else if (event.key === "ArrowLeft" && node.hasChildren && isOpen) {
+      event.preventDefault();
+      onToggle(node);
+    } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const tree = event.currentTarget.closest('[role="tree"]');
+      if (!tree) {
+        return;
+      }
+      const items = Array.from(tree.querySelectorAll<HTMLElement>('[role="treeitem"]'));
+      const idx = items.indexOf(event.currentTarget);
+      const nextIdx = event.key === "ArrowDown" ? idx + 1 : idx - 1;
+      if (nextIdx >= 0 && nextIdx < items.length) {
+        items[nextIdx].focus();
+      }
+    }
+  };
+
   return (
     <div>
       <div
+        role="treeitem"
+        aria-selected={selected === node.iri}
+        aria-expanded={node.hasChildren ? isOpen : undefined}
+        aria-level={depth + 1}
+        tabIndex={0}
         className={`row${selected === node.iri ? " active" : ""}`}
         style={{ paddingLeft: 8 + depth * 14 }}
         onClick={() => onSelect(node.iri)}
+        onKeyDown={handleKeyDown}
       >
         <button
+          type="button"
+          tabIndex={-1}
+          aria-label={
+            node.hasChildren ? (isOpen ? `Collapse ${node.label}` : `Expand ${node.label}`) : undefined
+          }
+          aria-hidden={!node.hasChildren}
           className="twisty"
           onClick={(event) => {
             event.stopPropagation();

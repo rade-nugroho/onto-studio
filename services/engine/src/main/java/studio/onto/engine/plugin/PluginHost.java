@@ -115,7 +115,7 @@ public final class PluginHost {
         private final OWLDataFactory dataFactory = OWLManager.getOWLDataFactory();
         private final Map<String, OWLEntity> entities = new LinkedHashMap<>();
         private final Map<String, String> labels = new LinkedHashMap<>();
-        private final List<String> selectedAxioms = new ArrayList<>();
+        private final Map<String, List<String>> axiomsByIri = new LinkedHashMap<>();
 
         @SuppressWarnings("unchecked")
         HostContext(Map<String, Object> payload) {
@@ -130,9 +130,10 @@ public final class PluginHost {
                 }
             }
             Map<String, Object> selected = (Map<String, Object>) payload.get("entity");
-            if (selected != null) {
+            if (selected != null && selected.get("iri") != null) {
+                String selectedIri = String.valueOf(selected.get("iri"));
                 List<String> axioms = (List<String>) selected.getOrDefault("axioms", List.of());
-                selectedAxioms.addAll(axioms);
+                axiomsByIri.put(selectedIri, List.copyOf(axioms));
             }
         }
 
@@ -169,7 +170,10 @@ public final class PluginHost {
 
         @Override
         public List<String> axiomsOf(OWLEntity entity) {
-            return selectedAxioms;
+            if (entity == null) {
+                return List.of();
+            }
+            return axiomsByIri.getOrDefault(entity.getIRI().toString(), List.of());
         }
     }
 }

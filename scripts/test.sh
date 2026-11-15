@@ -2,7 +2,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-export JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 21)}"
+if [ -z "${JAVA_HOME:-}" ] && command -v /usr/libexec/java_home >/dev/null 2>&1; then
+  export JAVA_HOME="$(/usr/libexec/java_home -v 21)"
+fi
 
 echo "== engine tests =="
 (cd "$ROOT/services/engine" && mvn -q test)

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
 
 type Turn = { role: "user" | "assistant"; text: string };
@@ -13,6 +13,14 @@ export default function AssistantPanel({
   const [turns, setTurns] = useState<Turn[]>([]);
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
+  const logRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = logRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [turns, busy]);
 
   const send = async () => {
     const question = value.trim();
@@ -38,7 +46,13 @@ export default function AssistantPanel({
         <span>Assistant</span>
         <span className="muted">{entityLabel ? `about ${entityLabel}` : "whole ontology"}</span>
       </div>
-      <div className="assistant-log">
+      <div
+        ref={logRef}
+        className="assistant-log"
+        role="log"
+        aria-live="polite"
+        aria-label="Assistant conversation"
+      >
         {turns.length === 0 && (
           <p className="muted">
             Ask about the open ontology. Answers come from Claude, grounded in the
@@ -54,6 +68,7 @@ export default function AssistantPanel({
       </div>
       <div className="assistant-composer">
         <input
+          aria-label="Ask assistant"
           placeholder="Ask anything…"
           value={value}
           onChange={(event) => setValue(event.target.value)}

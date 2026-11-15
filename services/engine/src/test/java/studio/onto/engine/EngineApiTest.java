@@ -474,6 +474,119 @@ class EngineApiTest {
         });
     }
 
+    @Test
+    void newOntologyInitializesActionsMarkingsAndBranches(@TempDir Path tempDir) throws Exception {
+        Path file = tempDir.resolve("fresh.owl");
+        String classIri = "file:" + file + "#Widget";
+        JavalinTest.test(Main.createApp(new Workspace(), "test"), (server, client) -> {
+            assertEquals(200, client.post("/ontology/new", "{\"path\":\"" + file + "\"}", HEADERS).code());
+            assertEquals(200, client.post("/axiom/batch",
+                    "{\"text\":\"Class: Widget\\n  SubClassOf: Thing\"}", HEADERS).code());
+
+            okhttp3.Response action = client.post("/action/commit",
+                    "{\"action\":\"set-label\",\"params\":{\"iri\":\"" + classIri
+                            + "\",\"label\":\"Main Widget\"},\"reason\":\"init\"}", HEADERS);
+            assertEquals(200, action.code(), body(action));
+
+            okhttp3.Response mark = client.post("/marking/set",
+                    "{\"iri\":\"" + classIri + "\",\"marking\":\"restricted\"}", HEADERS);
+            assertEquals(200, mark.code(), body(mark));
+            assertTrue(body(client.get("/marking?iri=" + URLEncoder.encode(classIri, StandardCharsets.UTF_8), HEADERS))
+                    .contains("restricted"));
+
+            assertEquals(200, client.post("/branch/create", "{\"name\":\"dev\"}", HEADERS).code());
+            String branches = body(client.get("/branch/list", HEADERS));
+            assertTrue(branches.contains("\"main\"") && branches.contains("\"dev\""), branches);
+            assertEquals(200, client.post("/branch/switch", "{\"name\":\"dev\"}", HEADERS).code());
+            assertEquals(200, client.post("/branch/promote", "{\"name\":\"dev\"}", HEADERS).code());
+        });
+    }
+
+    @Test
+    void installPluginRejectsNonHttpSchemesAndSanitizesQueryAndTraversal(@TempDir Path home) throws Exception {
+        byte[] bytes = "jar bytes".getBytes(StandardCharsets.UTF_8);
+        String digest = sha256Hex(bytes);
+        com.sun.net.httpserver.HttpServer http = com.sun.net.httpserver.HttpServer.create(
+                new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        http.createContext("/", exchange -> {
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        http.start();
+        String previousHome = System.getProperty("user.home");
+        System.setProperty("user.home", home.toString());
+        try {
+            JavalinTest.test(Main.createApp(new Workspace(), "test"), (server, client) -> {
+                okhttp3.Response fileScheme = client.post("/plugins/install",
+                        "{\"url\":\"file:///etc/passwd\",\"sha256\":\"" + digest + "\"}", HEADERS);
+                assertEquals(400, fileScheme.code());
+                String fileBody = body(fileScheme);
+                assertTrue(fileBody.contains("http and https"), fileBody);
+
+                String queryUrl = "http://127.0.0.1:" + http.getAddress().getPort()
+                        + "/good.jar?token=abc&v=1";
+                okhttp3.Response queryInstall = client.post("/plugins/install",
+                        "{\"url\":\"" + queryUrl + "\",\"sha256\":\"" + digest + "\"}", HEADERS);
+                assertEquals(200, queryInstall.code(), body(queryInstall));
+                assertTrue(Files.exists(home.resolve(".onto-studio/plugins/good.jar")));
+
+                String traversalUrl = "http://127.0.0.1:" + http.getAddress().getPort()
+                        + "/..%2Fevil.jar";
+                okhttp3.Response traversalInstall = client.post("/plugins/install",
+                        "{\"url\":\"" + traversalUrl + "\",\"sha256\":\"" + digest + "\"}", HEADERS);
+                assertEquals(200, traversalInstall.code(), body(traversalInstall));
+                assertFalse(Files.exists(home.resolve(".onto-studio/evil.jar")));
+                assertTrue(Files.exists(home.resolve(".onto-studio/plugins/evil.jar")));
+            });
+        } finally {
+            System.setProperty("user.home", previousHome);
+            http.stop(0);
+        }
+    }
+
+    @Test
+    void invalidInputsReturn400InsteadOf500() {
+        JavalinTest.test(Main.createApp(new Workspace(), "test"), (server, client) -> {
+            open(client);
+            assertEquals(400, client.get("/graph?depth=notanumber", HEADERS).code());
+            assertEquals(400, client.post("/axiom/subclass", "null", HEADERS).code());
+            assertEquals(400, client.post("/axiom/subclass", "{}", HEADERS).code());
+            assertEquals(400, client.post("/axiom/subclass",
+                    "{\"sub\":\"not a valid iri\",\"sup\":\"" + NS + "Pizza\"}", HEADERS).code());
+            assertEquals(400, client.post("/ontology/open", "null", HEADERS).code());
+            assertEquals(400, client.post("/document/extract", "{}", HEADERS).code());
+        });
+    }
+
+    @Test
+    void corsAllowsLocalOriginsAndRejectsExternalOrigins() {
+        assertTrue(Main.isAllowedOrigin("http://localhost:5173"));
+        assertTrue(Main.isAllowedOrigin("http://127.0.0.1:4173"));
+        assertTrue(Main.isAllowedOrigin("http://[::1]:5173"));
+        assertTrue(Main.isAllowedOrigin("tauri://localhost"));
+        assertTrue(Main.isAllowedOrigin("https://tauri.localhost"));
+        assertFalse(Main.isAllowedOrigin("https://evil.example"));
+        assertFalse(Main.isAllowedOrigin("http://localhost.evil.example"));
+
+        JavalinTest.test(Main.createApp(new Workspace(), "test"), (server, client) -> {
+            okhttp3.Response local = client.get("/health", builder -> builder
+                    .header("X-Engine-Token", "test")
+                    .header("Origin", "http://localhost:5173"));
+            assertEquals(200, local.code());
+            assertEquals("http://localhost:5173", local.header("Access-Control-Allow-Origin"));
+
+            okhttp3.Response evil = client.get("/health", builder -> builder
+                    .header("X-Engine-Token", "test")
+                    .header("Origin", "https://evil.example"));
+            assertEquals(200, evil.code());
+            assertEquals(null, evil.header("Access-Control-Allow-Origin"));
+
+            assertEquals(401, client.get("/health", builder -> builder
+                    .header("X-Engine-Token", "wrong")).code());
+        });
+    }
+
     private static void open(HttpClient client) {
         String response = body(client.post("/ontology/open", "{\"path\":\"" + PIZZA + "\"}", HEADERS));
         assertTrue(response.contains("\"axiomCount\":930"), response);

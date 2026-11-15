@@ -1,6 +1,7 @@
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import {
   api,
+  isAbortError,
   type ActionPreview,
   type AuditRow,
   type EditState,
@@ -37,6 +38,9 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
     error?: string;
   } | null>(null);
   const [audit, setAudit] = useState<AuditRow[]>([]);
+  const superAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => () => superAbortRef.current?.abort(), []);
 
   const run = useCallback(
     async (action: () => Promise<EditState>) => {
@@ -63,15 +67,24 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
 
   const suggestSupers = useCallback(async (value: string) => {
     setNewSuper(value);
+    superAbortRef.current?.abort();
     if (value.trim().length < 2) {
       setSuggestions([]);
       return;
     }
+    const controller = new AbortController();
+    superAbortRef.current = controller;
     try {
-      const found = (await api.search(value)).results.filter((result) => result.kind === "class");
-      setSuggestions(found.slice(0, 8));
-    } catch {
-      setSuggestions([]);
+      const found = (await api.search(value, undefined, controller.signal)).results.filter(
+        (result) => result.kind === "class",
+      );
+      if (!controller.signal.aborted) {
+        setSuggestions(found.slice(0, 8));
+      }
+    } catch (error) {
+      if (!isAbortError(error)) {
+        setSuggestions([]);
+      }
     }
   }, []);
 
@@ -91,25 +104,41 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
   );
 
   useEffect(() => {
+    const controller = new AbortController();
     api
-      .plugins()
-      .then((result) =>
-        setPluginActions(
-          result.plugins
-            .flatMap((plugin) => plugin.actions)
-            .filter((action) => Object.keys(action.params ?? {}).includes("iri")),
-        ),
-      )
-      .catch(() => setPluginActions([]));
+      .plugins(controller.signal)
+      .then((result) => {
+        if (!controller.signal.aborted) {
+          setPluginActions(
+            result.plugins
+              .flatMap((plugin) => plugin.actions)
+              .filter((action) => Object.keys(action.params ?? {}).includes("iri")),
+          );
+        }
+      })
+      .catch((error) => {
+        if (!isAbortError(error)) {
+          setPluginActions([]);
+        }
+      });
+    return () => controller.abort();
   }, []);
 
   useEffect(() => {
+    const controller = new AbortController();
     api
-      .audit()
-      .then((result) =>
-        setAudit(result.rows.filter((row) => row.entities.includes(entity.iri)).slice(0, 5)),
-      )
-      .catch(() => setAudit([]));
+      .audit(controller.signal)
+      .then((result) => {
+        if (!controller.signal.aborted) {
+          setAudit(result.rows.filter((row) => row.entities.includes(entity.iri)).slice(0, 5));
+        }
+      })
+      .catch((error) => {
+        if (!isAbortError(error)) {
+          setAudit([]);
+        }
+      });
+    return () => controller.abort();
   }, [entity.iri]);
 
   const previewPending = useCallback(
@@ -126,9 +155,10 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
   );
 
   const commitPending = useCallback(async () => {
-    if (!pending) {
+    if (!pending || busy) {
       return;
     }
+    setBusy(true);
     try {
       const result = await api.commitAction(pending.action, pending.params);
       onEdited(result);
@@ -142,8 +172,10 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
       );
     } catch (error) {
       onError((error as Error).message);
+    } finally {
+      setBusy(false);
     }
-  }, [entity.iri, onEdited, onError, pending]);
+  }, [busy, entity.iri, onEdited, onError, pending]);
 
   useEffect(() => {
     const text = axiomText.trim();
@@ -151,13 +183,29 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
       setValidation(null);
       return;
     }
+    const controller = new AbortController();
     const timer = setTimeout(() => {
       api
-        .validateAxiom(text)
-        .then(setValidation)
-        .catch((error: Error) => setValidation({ ok: false, axioms: [], error: error.message }));
+        .validateAxiom(text, controller.signal)
+        .then((result) => {
+          if (!controller.signal.aborted) {
+            setValidation(result);
+          }
+        })
+        .catch((error: unknown) => {
+          if (!isAbortError(error)) {
+            setValidation({
+              ok: false,
+              axioms: [],
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        });
     }, 400);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
   }, [axiomText]);
 
   const placeholderFor = (kind: string) => {
@@ -188,6 +236,7 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
         {entity.label} <span className="kind">{entity.kind}</span>
         <select
           className={`marking ${entity.marking}`}
+          aria-label="Security marking"
           value={entity.marking}
           onChange={async (event) => {
             try {
@@ -219,8 +268,11 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
             ))}
           </ul>
           <div className="row-actions">
-            <button onClick={commitPending}>Commit</button>
+            <button onClick={commitPending} disabled={busy}>
+              {busy ? "Committing…" : "Commit"}
+            </button>
             <button
+              disabled={busy}
               onClick={() => {
                 setPreview(null);
                 setPending(null);
@@ -256,6 +308,7 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
           ))}
           <div className="add-super">
             <input
+              aria-label="Add superclass"
               placeholder="Add superclass…"
               value={newSuper}
               onChange={(event) => suggestSupers(event.target.value)}
@@ -304,7 +357,11 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
         <Section title="Range">
           <RefsSection title="" items={entity.ranges} onSelect={onSelect} />
           <div className="action-row">
-            <input value={datatype} onChange={(event) => setDatatype(event.target.value)} />
+            <input
+              aria-label="Datatype"
+              value={datatype}
+              onChange={(event) => setDatatype(event.target.value)}
+            />
             <button
               onClick={() => previewPending("set-range", { iri: entity.iri, datatype })}
               disabled={!datatype.trim()}
@@ -350,6 +407,7 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
             </button>
             <button
               className="remove"
+              aria-label={`Remove axiom ${line}`}
               disabled={busy}
               onClick={() => run(() => api.removeRenderedAxiom(entity.iri, line))}
             >
@@ -424,6 +482,7 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
         )}
         <div className="action-row">
           <input
+            aria-label="New label"
             placeholder="New label…"
             value={labelDraft}
             onChange={(event) => setLabelDraft(event.target.value)}
@@ -454,6 +513,7 @@ export default function EntityPanel({ entity, onEdited, onSelect, onError }: Ent
       <Section title="Add axiom">
         <textarea
           className="axiom-input"
+          aria-label="Add axiom"
           rows={3}
           placeholder={placeholderFor(entity.kind)}
           value={axiomText}
@@ -489,25 +549,37 @@ function EntityPicker({
 }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   const search = useCallback(async (value: string) => {
     setQuery(value);
+    abortRef.current?.abort();
     if (value.trim().length < 2) {
       setResults([]);
       return;
     }
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
-      setResults(
-        (await api.search(value)).results.filter((result) => result.kind === "class").slice(0, 8),
-      );
-    } catch {
-      setResults([]);
+      const found = (await api.search(value, undefined, controller.signal)).results
+        .filter((result) => result.kind === "class")
+        .slice(0, 8);
+      if (!controller.signal.aborted) {
+        setResults(found);
+      }
+    } catch (error) {
+      if (!isAbortError(error)) {
+        setResults([]);
+      }
     }
   }, []);
 
   return (
     <div className="add-super">
       <input
+        aria-label={placeholder}
         placeholder={placeholder}
         value={query}
         onChange={(event) => search(event.target.value)}
@@ -585,7 +657,12 @@ function RefRow({
       <button className="link" onClick={onOpen}>
         {item.label}
       </button>
-      <button className="remove" onClick={onRemove} disabled={disabled}>
+      <button
+        className="remove"
+        aria-label={`Remove ${item.label}`}
+        onClick={onRemove}
+        disabled={disabled}
+      >
         ×
       </button>
     </div>

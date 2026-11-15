@@ -16,11 +16,16 @@ import java.nio.file.Path;
 public final class DocumentText {
 
     private static final int LIMIT = 60_000;
+    static final long MAX_BYTES = 20L * 1024 * 1024;
 
     private DocumentText() {
     }
 
     public static String extract(Path path) throws Exception {
+        long size = Files.size(path);
+        if (size > MAX_BYTES) {
+            throw new IllegalArgumentException("Document exceeds 20 MB limit (" + size + " bytes)");
+        }
         String name = path.getFileName().toString().toLowerCase();
         String text;
         if (name.endsWith(".pdf")) {
