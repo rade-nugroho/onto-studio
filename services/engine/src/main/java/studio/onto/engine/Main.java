@@ -33,8 +33,9 @@ public final class Main {
             assistant.close();
         }, "engine-shutdown"));
         Javalin app = createApp(workspace, token, assistant);
-        app.start("127.0.0.1", port);
-        assistant.setEndpoint("http://127.0.0.1:" + app.port(), token);
+        String bind = bindAddress();
+        app.start(bind, port);
+        assistant.setEndpoint("http://" + endpointHost(bind) + ":" + app.port(), token);
         if (java.util.Arrays.asList(args).contains("--watch-parent")) {
             watchParent();
         }
@@ -348,6 +349,27 @@ public final class Main {
         } catch (NumberFormatException error) {
             throw new IllegalArgumentException("Invalid depth: " + raw);
         }
+    }
+
+    /**
+     * Listen address. Unset or blank {@code ENGINE_BIND} stays on 127.0.0.1.
+     * Compose sets {@code ENGINE_BIND=0.0.0.0} so a published port can reach
+     * the process. The request token is unchanged.
+     */
+    static String bindAddress() {
+        String configured = System.getenv("ENGINE_BIND");
+        if (configured == null || configured.isBlank()) {
+            return "127.0.0.1";
+        }
+        return configured.trim();
+    }
+
+    /** Loopback is the client address when the process listens on every interface. */
+    private static String endpointHost(String bind) {
+        if ("0.0.0.0".equals(bind) || "::".equals(bind) || "[::]".equals(bind)) {
+            return "127.0.0.1";
+        }
+        return bind;
     }
 
     private static int intArg(String[] args, String name, int fallback) {

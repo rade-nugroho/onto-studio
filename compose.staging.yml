@@ -1,0 +1,43 @@
+# Staging uses the prod security flags with smaller limits.
+# No host Docker socket. Image tag is the git sha (ENGINE_IMAGE_TAG).
+# Set ENGINE_TOKEN and ONTO_STUDIO_DATA in the environment.
+
+name: onto-studio-staging
+
+services:
+  engine:
+    image: onto-studio-engine:${ENGINE_IMAGE_TAG:?Set ENGINE_IMAGE_TAG to the git sha}
+    read_only: true
+    user: "65532:65532"
+    privileged: false
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 1g
+    memswap_limit: 1g
+    cpus: "1.0"
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,nodev,size=128m,uid=65532,gid=65532,mode=1777"
+      - "/home/nonroot:rw,nosuid,nodev,size=64m,uid=65532,gid=65532,mode=0750"
+    ports:
+      - "127.0.0.1:7717:7717"
+    environment:
+      ENGINE_TOKEN:
+      ENGINE_BIND: "0.0.0.0"
+      ENGINE_PORT: "7717"
+    volumes:
+      - ${ONTO_STUDIO_DATA:?Set ONTO_STUDIO_DATA to the ontology directory}:/data
+    networks:
+      - engine
+    restart: "on-failure:5"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  engine:
+    driver: bridge

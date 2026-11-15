@@ -1,0 +1,103 @@
+name: Deploy
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment to promote
+        required: true
+        type: choice
+        options:
+          - staging
+          - prod
+
+permissions:
+  contents: read
+
+jobs:
+  pull-request:
+    name: Build engine image
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build engine image
+        run: |
+          set -euo pipefail
+          tag="onto-studio-engine:${GITHUB_SHA}"
+          docker build -f services/engine/Dockerfile -t "${tag}" .
+          echo "Built ${tag}"
+
+  staging:
+    name: Build staging image
+    if: github.event_name == 'workflow_dispatch' && inputs.environment == 'staging'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: staging
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build engine image
+        run: |
+          set -euo pipefail
+          tag="onto-studio-engine:${GITHUB_SHA}"
+          docker build -f services/engine/Dockerfile -t "${tag}" .
+          echo "Built ${tag}"
+
+      - name: Push when registry credentials exist
+        env:
+          ENGINE_REGISTRY: ${{ vars.ENGINE_REGISTRY }}
+          ENGINE_REGISTRY_USERNAME: ${{ secrets.ENGINE_REGISTRY_USERNAME }}
+          ENGINE_REGISTRY_PASSWORD: ${{ secrets.ENGINE_REGISTRY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          tag="onto-studio-engine:${GITHUB_SHA}"
+          if [ -z "${ENGINE_REGISTRY}" ] || [ -z "${ENGINE_REGISTRY_USERNAME}" ] || [ -z "${ENGINE_REGISTRY_PASSWORD}" ]; then
+            echo "No registry credentials. Stopping after local build. Image tag: ${tag}"
+            exit 0
+          fi
+          host="${ENGINE_REGISTRY%%/*}"
+          printf '%s' "${ENGINE_REGISTRY_PASSWORD}" | docker login "${host}" --username "${ENGINE_REGISTRY_USERNAME}" --password-stdin
+          docker tag "${tag}" "${ENGINE_REGISTRY}:${GITHUB_SHA}"
+          docker push "${ENGINE_REGISTRY}:${GITHUB_SHA}"
+          echo "Pushed ${ENGINE_REGISTRY}:${GITHUB_SHA}"
+
+  prod:
+    name: Build prod image
+    if: github.event_name == 'workflow_dispatch' && inputs.environment == 'prod'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: prod
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build engine image
+        run: |
+          set -euo pipefail
+          tag="onto-studio-engine:${GITHUB_SHA}"
+          docker build -f services/engine/Dockerfile -t "${tag}" .
+          echo "Built ${tag}"
+
+      - name: Push when registry credentials exist
+        env:
+          ENGINE_REGISTRY: ${{ vars.ENGINE_REGISTRY }}
+          ENGINE_REGISTRY_USERNAME: ${{ secrets.ENGINE_REGISTRY_USERNAME }}
+          ENGINE_REGISTRY_PASSWORD: ${{ secrets.ENGINE_REGISTRY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          tag="onto-studio-engine:${GITHUB_SHA}"
+          if [ -z "${ENGINE_REGISTRY}" ] || [ -z "${ENGINE_REGISTRY_USERNAME}" ] || [ -z "${ENGINE_REGISTRY_PASSWORD}" ]; then
+            echo "No registry credentials. Stopping after local build. Image tag: ${tag}"
+            exit 0
+          fi
+          host="${ENGINE_REGISTRY%%/*}"
+          printf '%s' "${ENGINE_REGISTRY_PASSWORD}" | docker login "${host}" --username "${ENGINE_REGISTRY_USERNAME}" --password-stdin
+          docker tag "${tag}" "${ENGINE_REGISTRY}:${GITHUB_SHA}"
+          docker push "${ENGINE_REGISTRY}:${GITHUB_SHA}"
+          echo "Pushed ${ENGINE_REGISTRY}:${GITHUB_SHA}"
