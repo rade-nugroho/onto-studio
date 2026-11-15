@@ -188,7 +188,7 @@ export function ConnectorsPanel({ onClose }: { onClose?: () => void }) {
         <TextInput
           label={mode === "yours" ? "Search connections" : "Search providers"}
           value={search}
-          onChange={(event) => setSearch(event.target.value)}
+          onChange={(value) => setSearch(value)}
           placeholder={mode === "yours" ? "Filter configured connections" : "Filter provider catalog"}
         />
         {gatewayError ? <Banner status="warning" title="Gateway" description={gatewayError} /> : null}
@@ -268,16 +268,16 @@ export function ConnectorsPanel({ onClose }: { onClose?: () => void }) {
               />
             ))}
           </Stack>
-          <TextInput label="Class IRI" value={classIri} onChange={(event) => setClassIri(event.target.value)} />
+          <TextInput label="Class IRI" value={classIri} onChange={(value) => setClassIri(value)} />
           <TextInput
             label="ID output field"
             value={idField}
-            onChange={(event) => setIdField(event.target.value)}
+            onChange={(value) => setIdField(value)}
           />
           <TextInput
             label="Field map"
             value={fieldMapText}
-            onChange={(event) => setFieldMapText(event.target.value)}
+            onChange={(value) => setFieldMapText(value)}
             description="One mapping per line: outputField=propertyIri"
           />
           <Stack direction="horizontal" gap={2}>
