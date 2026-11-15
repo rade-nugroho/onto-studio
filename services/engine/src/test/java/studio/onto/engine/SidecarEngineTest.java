@@ -143,7 +143,7 @@ class SidecarEngineTest {
                     "http://127.0.0.1:1/realms/other", "\"onto-studio\"", soon))).code());
             assertEquals(401, client.get("/search", bearer(rsaToken(
                     issuer, "\"onto-studio\"", Instant.now().getEpochSecond() - 120))).code());
-            assertEquals(401, client.get("/search", bearer(valid.substring(0, valid.length() - 1) + "a")).code());
+            assertEquals(401, client.get("/search", bearer(tamperSignature(valid))).code());
             assertEquals(401, client.get("/search", bearer(
                     "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJpc3MiOiJ4In0.x")).code());
         });
@@ -380,6 +380,18 @@ class SidecarEngineTest {
 
     private static String b64(byte[] bytes) {
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
+    /**
+     * Flips the first signature character. The final base64url character can
+     * sit entirely in unused padding bits, so changing only that character
+     * leaves a valid token.
+     */
+    private static String tamperSignature(String token) {
+        int index = token.lastIndexOf('.') + 1;
+        char current = token.charAt(index);
+        char replacement = current == 'A' ? 'B' : 'A';
+        return token.substring(0, index) + replacement + token.substring(index + 1);
     }
 
     private static Consumer<okhttp3.Request.Builder> token() {
